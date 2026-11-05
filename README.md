@@ -8,7 +8,6 @@
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Status: pre-alpha" src="https://img.shields.io/badge/status-pre--alpha-orange">
   <img alt="Air-gapped by design" src="https://img.shields.io/badge/air--gapped-by%20design-111827">
-  <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-111827">
 </p>
 
 <p align="center">
