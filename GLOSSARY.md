@@ -27,3 +27,19 @@ _Avoid_: Rental, hosted, managed
 **Improvement loop**:
 The process by which a Private AI system measurably gets better over time from the customer's own feedback and evaluations.
 _Avoid_: Continuous learning, auto-training, evolution
+
+**Collection**:
+A named set of documents ingested into a Private AI system, and the unit to which access is granted.
+_Avoid_: Library, corpus, index, folder
+
+**Eval set**:
+The approved questions, with expected answers and source citations, against which a configuration is scored.
+_Avoid_: Test set, benchmark, golden set
+
+**Candidate configuration**:
+A proposed change to how a Private AI system retrieves and answers, not yet adopted.
+_Avoid_: Experiment, variant, trial
+
+**Promotion**:
+Adopting a candidate configuration because it beat the current one on the eval set; it can be rolled back.
+_Avoid_: Deploy, release, merge
