@@ -26,6 +26,8 @@ class Citation:
 
     document_id: int
     text: str
+    start_offset: int
+    end_offset: int
 
 
 @dataclass

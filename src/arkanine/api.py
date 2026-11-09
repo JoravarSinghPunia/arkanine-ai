@@ -1,4 +1,5 @@
 import os
+from typing import Any, Optional
 
 import httpx
 import psycopg
@@ -50,6 +51,8 @@ class CitationResponse(BaseModel):
 
     document_id: int
     text: str
+    start_offset: int
+    end_offset: int
 
 
 class AnswerResponse(BaseModel):
@@ -164,22 +167,67 @@ def create_app() -> FastAPI:
 
         answer_text = inference_data["choices"][0]["message"]["content"]
 
-        # Extract citations from document references in the answer
+        # Extract citations by finding referenced documents in the answer
+        # and locating relevant passages in their content
         citations = []
         for doc in docs:
-            # Simple citation extraction: look for "[Document N]" references
-
             if f"[Document {doc.id}]" in answer_text:
-                # Extract the first sentence/passage from the document
-                sentences = doc.content.split(". ")
-                if sentences:
+                # Find the most relevant passage: extract a sentence or phrase
+                # containing keywords from the answer that also appear in the doc
+                passage = _extract_best_passage(doc.content, answer_text)
+                if passage and passage["text"]:
                     citations.append(
-                        CitationResponse(document_id=doc.id, text=sentences[0])
+                        CitationResponse(
+                            document_id=doc.id,
+                            text=passage["text"],
+                            start_offset=passage["start"],
+                            end_offset=passage["end"],
+                        )
                     )
 
         return AnswerResponse(answer=answer_text, citations=citations)
 
     return app
+
+
+def _extract_best_passage(
+    content: str, answer: str
+) -> Optional[dict[str, Any]]:
+    """Extract a passage from content that relates to the answer.
+
+    Returns a dict with 'text', 'start', and 'end' keys, or None if no passage found.
+    """
+    # Split content into sentences
+    sentences = [s.strip() for s in content.split(". ") if s.strip()]
+    if not sentences:
+        return None
+
+    # Find the sentence that best overlaps with the answer
+    best_sentence = None
+    best_overlap = 0
+
+    for sentence in sentences:
+        # Count word overlap between sentence and answer
+        sentence_words = set(sentence.lower().split())
+        answer_words = set(answer.lower().split())
+        overlap = len(sentence_words & answer_words)
+
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_sentence = sentence
+
+    if best_sentence is None:
+        # Fallback: return first sentence
+        best_sentence = sentences[0]
+
+    # Find position in original content
+    start_offset = content.find(best_sentence)
+    if start_offset == -1:
+        start_offset = 0
+
+    end_offset = start_offset + len(best_sentence)
+
+    return {"text": best_sentence, "start": start_offset, "end": end_offset}
 
 
 app = create_app()
