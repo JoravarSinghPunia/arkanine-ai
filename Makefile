@@ -29,9 +29,13 @@ test: ## Run the test suite
 	exit $$code
 
 lint: ## Run linters and type checks
-	$(PY) -m ruff check .
-	$(PY) -m ruff format --check .
+	$(PY) -m ruff check src tests testing
+	$(PY) -m ruff format --check src tests testing
 	$(PY) -m mypy
+
+lint-fix: ## Automatically fix linting issues
+	$(PY) -m ruff check --fix src tests testing
+	$(PY) -m ruff format src tests testing
 
 bundle: ## Build the signed offline bundle
 	@$(call todo,$@)

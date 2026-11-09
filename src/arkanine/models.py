@@ -1,4 +1,5 @@
 """Domain models for Collections and Documents."""
+
 from dataclasses import dataclass
 
 

@@ -1,4 +1,5 @@
 """Tests for Collection creation and document ingestion."""
+
 import time
 
 import httpx
@@ -7,7 +8,7 @@ import httpx
 def test_create_collection(api: httpx.Client) -> None:
     """Can create a named Collection."""
     # Use timestamps to ensure unique names
-    unique_name = f"my-docs-{int(time.time()*1000)}"
+    unique_name = f"my-docs-{int(time.time() * 1000)}"
     response = api.post("/collections", json={"name": unique_name})
 
     assert response.status_code == 201
@@ -19,7 +20,7 @@ def test_create_collection(api: httpx.Client) -> None:
 def test_ingest_document(api: httpx.Client) -> None:
     """Can ingest text into a Collection."""
     # Use timestamps to ensure unique names
-    unique_name = f"docs-ingest-{int(time.time()*1000)}"
+    unique_name = f"docs-ingest-{int(time.time() * 1000)}"
     # Create a collection
     collection = api.post("/collections", json={"name": unique_name}).json()
     collection_id = collection["id"]
@@ -40,7 +41,7 @@ def test_ingest_document(api: httpx.Client) -> None:
 def test_answer_question_with_citations(api: httpx.Client) -> None:
     """Can answer a question with citations from ingested documents."""
     # Use timestamps to ensure unique names
-    unique_name = f"docs-answer-{int(time.time()*1000)}"
+    unique_name = f"docs-answer-{int(time.time() * 1000)}"
     # Create a collection
     collection = api.post("/collections", json={"name": unique_name}).json()
     collection_id = collection["id"]
@@ -75,7 +76,7 @@ def test_answer_question_with_citations(api: httpx.Client) -> None:
 
 def test_documents_with_instructions_treated_as_content(api: httpx.Client) -> None:
     """Document content is treated as content, not instructions."""
-    unique_name = f"docs-instruction-{int(time.time()*1000)}"
+    unique_name = f"docs-instruction-{int(time.time() * 1000)}"
     collection = api.post("/collections", json={"name": unique_name}).json()
     collection_id = collection["id"]
 

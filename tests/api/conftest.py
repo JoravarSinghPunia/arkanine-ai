@@ -24,7 +24,9 @@ def fake_inference() -> Iterator[httpx.Client]:
 @pytest.fixture(autouse=True)
 def cleanup_database() -> Iterator[None]:
     """Clean up database before each test."""
-    db_url = os.environ.get("DATABASE_URL", "postgresql://arkanine:arkanine@localhost:5432/arkanine")
+    db_url = os.environ.get(
+        "DATABASE_URL", "postgresql://arkanine:arkanine@localhost:5432/arkanine"
+    )
     try:
         with psycopg.connect(db_url) as conn:
             with conn.cursor() as cur:
@@ -34,5 +36,5 @@ def cleanup_database() -> Iterator[None]:
     except Exception:
         # Ignore errors during cleanup
         pass
-    
+
     yield

@@ -1,4 +1,5 @@
 """Repository layer for database operations."""
+
 import os
 from typing import Any, Optional
 
@@ -7,9 +8,7 @@ import psycopg
 from arkanine.models import Collection, Document
 
 
-def _execute_query(
-    sql: str, params: tuple[object, ...], fetch_one: bool = False
-) -> Any:
+def _execute_query(sql: str, params: tuple[object, ...], fetch_one: bool = False) -> Any:
     """Execute a query and commit, returning one or all rows."""
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         with conn.cursor() as cur:
@@ -64,9 +63,7 @@ class DocumentRepository:
         )
         if not row:
             raise RuntimeError("Failed to create document")
-        return Document(
-            id=row[0], collection_id=row[1], title=row[2], content=row[3]
-        )
+        return Document(id=row[0], collection_id=row[1], title=row[2], content=row[3])
 
     @staticmethod
     def get_by_collection(collection_id: int) -> list[Document]:
@@ -79,6 +76,5 @@ class DocumentRepository:
             (collection_id,),
         )
         return [
-            Document(id=row[0], collection_id=row[1], title=row[2], content=row[3])
-            for row in rows
+            Document(id=row[0], collection_id=row[1], title=row[2], content=row[3]) for row in rows
         ]

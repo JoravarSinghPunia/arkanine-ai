@@ -17,23 +17,23 @@ async def chat_completions(request: Request) -> dict[str, object]:
     """Generate a canned response that references documents in the input."""
     body = await request.json()
     messages = body.get("messages", [])
-    
+
     # Extract the user message
     user_message = ""
     for msg in messages:
         if msg.get("role") == "user":
             user_message = msg.get("content", "")
             break
-    
+
     # Look for document references in the user message
     doc_refs = re.findall(r"\[Document (\d+)\]", user_message)
-    
+
     # Generate a response that references the first document found
     if doc_refs:
         answer = f"Based on the information provided in [Document {doc_refs[0]}], the sky is blue."
     else:
         answer = "This is a canned answer from the fake inference server."
-    
+
     return {
         "id": "chatcmpl-fake",
         "object": "chat.completion",
@@ -48,4 +48,3 @@ async def chat_completions(request: Request) -> dict[str, object]:
         ],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
-

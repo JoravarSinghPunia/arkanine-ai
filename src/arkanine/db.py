@@ -1,4 +1,5 @@
 """Database initialization and schema."""
+
 import os
 
 import psycopg

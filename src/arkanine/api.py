@@ -105,23 +105,17 @@ def create_app() -> FastAPI:
         return CollectionResponse(id=collection.id, name=collection.name)
 
     @app.post("/collections/{collection_id}/documents", status_code=201)
-    def ingest_document(
-        collection_id: int, req: IngestDocumentRequest
-    ) -> DocumentResponse:
+    def ingest_document(collection_id: int, req: IngestDocumentRequest) -> DocumentResponse:
         """Ingest a document into a collection."""
         collection = CollectionRepository.get_by_id(collection_id)
         if not collection:
             raise HTTPException(status_code=404, detail="Collection not found")
 
         doc = DocumentRepository.create(collection_id, req.title, req.content)
-        return DocumentResponse(
-            id=doc.id, collection_id=doc.collection_id, title=doc.title
-        )
+        return DocumentResponse(id=doc.id, collection_id=doc.collection_id, title=doc.title)
 
     @app.post("/collections/{collection_id}/answer")
-    def answer_question(
-        collection_id: int, req: AnswerRequest
-    ) -> AnswerResponse:
+    def answer_question(collection_id: int, req: AnswerRequest) -> AnswerResponse:
         """Answer a question using documents in a collection."""
         collection = CollectionRepository.get_by_id(collection_id)
         if not collection:
@@ -135,9 +129,7 @@ def create_app() -> FastAPI:
             )
 
         # Build context from all documents
-        context = "\n\n".join(
-            f"[Document {doc.id}] {doc.title}:\n{doc.content}" for doc in docs
-        )
+        context = "\n\n".join(f"[Document {doc.id}] {doc.title}:\n{doc.content}" for doc in docs)
 
         # Call inference API with RAG prompt
         base_url = os.environ["INFERENCE_BASE_URL"].rstrip("/")
@@ -190,9 +182,7 @@ def create_app() -> FastAPI:
     return app
 
 
-def _extract_best_passage(
-    content: str, answer: str
-) -> Optional[dict[str, Any]]:
+def _extract_best_passage(content: str, answer: str) -> Optional[dict[str, Any]]:
     """Extract a passage from content that relates to the answer.
 
     Returns a dict with 'text', 'start', and 'end' keys, or None if no passage found.
