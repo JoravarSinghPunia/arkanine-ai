@@ -3,7 +3,7 @@ import os
 import httpx
 import psycopg
 from fastapi import FastAPI, HTTPException, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from arkanine.answering import build_messages, not_found, parse_reply
 from arkanine.db import create_schema
@@ -11,6 +11,7 @@ from arkanine.extraction import (
     SUPPORTED_EXTENSIONS,
     UnreadableFile,
     UnsupportedFileType,
+    check_document_text,
     extract_text,
 )
 from arkanine.passages import find_relevant_passages
@@ -42,6 +43,14 @@ class IngestDocumentRequest(BaseModel):
 
     title: str
     content: str
+
+    @field_validator("title", "content")
+    @classmethod
+    def _storable(cls, value: str) -> str:
+        try:
+            return check_document_text(value)
+        except UnreadableFile as error:
+            raise ValueError(str(error)) from None
 
 
 class DocumentResponse(BaseModel):
@@ -136,19 +145,13 @@ def create_app() -> FastAPI:
     @app.post("/collections/{collection_id}/documents", status_code=201)
     def ingest_document(collection_id: int, req: IngestDocumentRequest) -> DocumentResponse:
         """Ingest a document into a collection."""
-        collection = CollectionRepository.get_by_id(collection_id)
-        if not collection:
-            raise HTTPException(status_code=404, detail="Collection not found")
-
-        doc = DocumentRepository.create(collection_id, req.title, req.content)
-        return DocumentResponse(id=doc.id, collection_id=doc.collection_id, title=doc.title)
+        _require_collection(collection_id)
+        return _ingest(collection_id, req.title, req.content)
 
     @app.post("/collections/{collection_id}/documents/upload", status_code=201)
     def upload_document(collection_id: int, file: UploadFile) -> DocumentResponse:
         """Ingest an uploaded file into a collection, titled by its filename."""
-        if not CollectionRepository.get_by_id(collection_id):
-            raise HTTPException(status_code=404, detail="Collection not found")
-
+        _require_collection(collection_id)
         filename = file.filename or "untitled"
         try:
             content = extract_text(filename, file.file.read())
@@ -161,8 +164,7 @@ def create_app() -> FastAPI:
         except UnreadableFile as error:
             raise HTTPException(status_code=422, detail=f"{filename}: {error}") from None
 
-        doc = DocumentRepository.create(collection_id, filename, content)
-        return DocumentResponse(id=doc.id, collection_id=doc.collection_id, title=doc.title)
+        return _ingest(collection_id, filename, content)
 
     @app.get("/collections/{collection_id}/documents/{document_id}")
     def get_document(collection_id: int, document_id: int) -> DocumentContentResponse:
@@ -177,10 +179,7 @@ def create_app() -> FastAPI:
     @app.post("/collections/{collection_id}/answer")
     def answer_question(collection_id: int, req: AnswerRequest) -> AnswerResponse:
         """Answer a question using documents in a collection."""
-        collection = CollectionRepository.get_by_id(collection_id)
-        if not collection:
-            raise HTTPException(status_code=404, detail="Collection not found")
-
+        _require_collection(collection_id)
         docs = DocumentRepository.get_by_collection(collection_id)
         passages = find_relevant_passages(docs, req.question)
         if not passages:
@@ -205,6 +204,16 @@ def create_app() -> FastAPI:
         )
 
     return app
+
+
+def _require_collection(collection_id: int) -> None:
+    if not CollectionRepository.get_by_id(collection_id):
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+
+def _ingest(collection_id: int, title: str, content: str) -> DocumentResponse:
+    doc = DocumentRepository.create(collection_id, title, content)
+    return DocumentResponse(id=doc.id, collection_id=doc.collection_id, title=doc.title)
 
 
 def _complete(messages: list[dict[str, str]]) -> str:

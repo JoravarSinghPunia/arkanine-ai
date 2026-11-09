@@ -16,11 +16,21 @@ class UnreadableFile(Exception):
     """The file has a supported type but its text could not be read."""
 
 
+def check_document_text(text: str) -> str:
+    """Reject text that can't be stored or could never be cited."""
+    if "\x00" in text:
+        raise UnreadableFile("contains a null character")
+    if not text.strip():
+        raise UnreadableFile("contains no text")
+    return text
+
+
 def _decode_utf8(data: bytes) -> str:
     try:
-        return data.decode("utf-8-sig")
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise UnreadableFile("not valid UTF-8 text") from error
+    return check_document_text(text)
 
 
 _EXTRACTORS: dict[str, Callable[[bytes], str]] = {

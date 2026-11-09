@@ -22,6 +22,10 @@ def _execute_query(sql: str, params: tuple[object, ...], fetch_one: bool = False
     return result
 
 
+def _document(row: tuple[Any, ...]) -> Document:
+    return Document(id=row[0], collection_id=row[1], title=row[2], content=row[3])
+
+
 class CollectionRepository:
     """Repository for Collection operations."""
 
@@ -70,7 +74,7 @@ class DocumentRepository:
         )
         if not row:
             raise RuntimeError("Failed to create document")
-        return Document(id=row[0], collection_id=row[1], title=row[2], content=row[3])
+        return _document(row)
 
     @staticmethod
     def get(collection_id: int, document_id: int) -> Optional[Document]:
@@ -85,7 +89,7 @@ class DocumentRepository:
         )
         if not row:
             return None
-        return Document(id=row[0], collection_id=row[1], title=row[2], content=row[3])
+        return _document(row)
 
     @staticmethod
     def get_by_collection(collection_id: int) -> list[Document]:
@@ -97,6 +101,4 @@ class DocumentRepository:
             ),
             (collection_id,),
         )
-        return [
-            Document(id=row[0], collection_id=row[1], title=row[2], content=row[3]) for row in rows
-        ]
+        return [_document(row) for row in rows]

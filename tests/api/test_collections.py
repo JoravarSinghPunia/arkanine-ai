@@ -3,6 +3,7 @@ import uuid
 from collections.abc import Callable
 
 import httpx
+import pytest
 
 
 def test_creates_a_named_collection(api: httpx.Client) -> None:
@@ -126,6 +127,7 @@ def test_instruction_like_document_text_is_sent_only_as_quarantined_content(
     ).json()
     sent = fake_inference.get("/_test/last_request").json()
 
+    assert sent["model"] == "fake-chat"
     assert "tools" not in sent and "tool_choice" not in sent and "functions" not in sent
     system, user = sent["messages"]
     assert system["role"] == "system" and "sky" not in system["content"]
@@ -179,11 +181,25 @@ def test_rejects_an_unsupported_file_type_clearly(api: httpx.Client, collection_
     assert "report.pdf" in response.json()["detail"]
 
 
-def test_rejects_an_unreadable_text_file_clearly(api: httpx.Client, collection_id: int) -> None:
+@pytest.mark.parametrize("data", [b"\xff\xfebad", b"null\x00byte", b"", b"  \n\n "], ids=str)
+def test_rejects_an_unreadable_text_file_clearly(
+    api: httpx.Client, collection_id: int, data: bytes
+) -> None:
     response = api.post(
         f"/collections/{collection_id}/documents/upload",
-        files={"file": ("broken.txt", b"\xff\xfe\x00bad", "text/plain")},
+        files={"file": ("broken.txt", data, "text/plain")},
     )
 
     assert response.status_code == 422
     assert "broken.txt" in response.json()["detail"]
+
+
+def test_rejects_document_text_containing_a_null_character(
+    api: httpx.Client, collection_id: int
+) -> None:
+    response = api.post(
+        f"/collections/{collection_id}/documents",
+        json={"title": "Nul", "content": "null\u0000byte"},
+    )
+
+    assert response.status_code == 422
