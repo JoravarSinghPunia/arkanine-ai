@@ -1,15 +1,28 @@
 import os
-from typing import Any, Optional
 
 import httpx
 import psycopg
-from fastapi import FastAPI, HTTPException, Response
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Response, UploadFile
+from pydantic import BaseModel, field_validator
 
+from arkanine.answering import build_messages, not_found, parse_reply
 from arkanine.db import create_schema
-from arkanine.repository import CollectionRepository, DocumentRepository
+from arkanine.extraction import (
+    SUPPORTED_EXTENSIONS,
+    UnreadableFile,
+    UnsupportedFileType,
+    check_document_text,
+    extract_text,
+)
+from arkanine.passages import find_relevant_passages
+from arkanine.repository import (
+    CollectionRepository,
+    DocumentRepository,
+    DuplicateCollectionName,
+)
 
 CHECK_TIMEOUT_SECONDS = 2
+INFERENCE_TIMEOUT_SECONDS = 120
 
 
 class CreateCollectionRequest(BaseModel):
@@ -31,6 +44,14 @@ class IngestDocumentRequest(BaseModel):
     title: str
     content: str
 
+    @field_validator("title", "content")
+    @classmethod
+    def _storable(cls, value: str) -> str:
+        try:
+            return check_document_text(value)
+        except UnreadableFile as error:
+            raise ValueError(str(error)) from None
+
 
 class DocumentResponse(BaseModel):
     """Response with document details."""
@@ -38,6 +59,15 @@ class DocumentResponse(BaseModel):
     id: int
     collection_id: int
     title: str
+
+
+class DocumentContentResponse(BaseModel):
+    """A document with its full content, for opening a citation in context."""
+
+    id: int
+    collection_id: int
+    title: str
+    content: str
 
 
 class AnswerRequest(BaseModel):
@@ -50,15 +80,20 @@ class CitationResponse(BaseModel):
     """A citation in an answer."""
 
     document_id: int
+    document_title: str
     text: str
     start_offset: int
     end_offset: int
 
 
 class AnswerResponse(BaseModel):
-    """Response with answer and citations."""
+    """Response with answer and citations.
+
+    `answered` is false when the documents don't contain an answer.
+    """
 
     answer: str
+    answered: bool
     citations: list[CitationResponse]
 
 
@@ -101,123 +136,102 @@ def create_app() -> FastAPI:
     @app.post("/collections", status_code=201)
     def create_collection(req: CreateCollectionRequest) -> CollectionResponse:
         """Create a new collection."""
-        collection = CollectionRepository.create(req.name)
+        try:
+            collection = CollectionRepository.create(req.name)
+        except DuplicateCollectionName:
+            raise HTTPException(status_code=409, detail="Collection name already exists") from None
         return CollectionResponse(id=collection.id, name=collection.name)
 
     @app.post("/collections/{collection_id}/documents", status_code=201)
     def ingest_document(collection_id: int, req: IngestDocumentRequest) -> DocumentResponse:
         """Ingest a document into a collection."""
-        collection = CollectionRepository.get_by_id(collection_id)
-        if not collection:
-            raise HTTPException(status_code=404, detail="Collection not found")
+        _require_collection(collection_id)
+        return _ingest(collection_id, req.title, req.content)
 
-        doc = DocumentRepository.create(collection_id, req.title, req.content)
-        return DocumentResponse(id=doc.id, collection_id=doc.collection_id, title=doc.title)
+    @app.post("/collections/{collection_id}/documents/upload", status_code=201)
+    def upload_document(collection_id: int, file: UploadFile) -> DocumentResponse:
+        """Ingest an uploaded file into a collection, titled by its filename."""
+        _require_collection(collection_id)
+        filename = file.filename or "untitled"
+        try:
+            content = extract_text(filename, file.file.read())
+        except UnsupportedFileType:
+            raise HTTPException(
+                status_code=415,
+                detail=f"{filename}: unsupported file type; supported: "
+                + ", ".join(SUPPORTED_EXTENSIONS),
+            ) from None
+        except UnreadableFile as error:
+            raise HTTPException(status_code=422, detail=f"{filename}: {error}") from None
+
+        return _ingest(collection_id, filename, content)
+
+    @app.get("/collections/{collection_id}/documents/{document_id}")
+    def get_document(collection_id: int, document_id: int) -> DocumentContentResponse:
+        """Open a document in full, so a citation's offsets can be shown in context."""
+        doc = DocumentRepository.get(collection_id, document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return DocumentContentResponse(
+            id=doc.id, collection_id=doc.collection_id, title=doc.title, content=doc.content
+        )
 
     @app.post("/collections/{collection_id}/answer")
     def answer_question(collection_id: int, req: AnswerRequest) -> AnswerResponse:
         """Answer a question using documents in a collection."""
-        collection = CollectionRepository.get_by_id(collection_id)
-        if not collection:
-            raise HTTPException(status_code=404, detail="Collection not found")
-
+        _require_collection(collection_id)
         docs = DocumentRepository.get_by_collection(collection_id)
-        if not docs:
-            return AnswerResponse(
-                answer="I don't have any documents to answer from.",
-                citations=[],
-            )
+        passages = find_relevant_passages(docs, req.question)
+        if not passages:
+            result = not_found()
+        else:
+            reply = _complete(build_messages(passages, req.question))
+            result = parse_reply(reply, passages)
 
-        # Build context from all documents
-        context = "\n\n".join(f"[Document {doc.id}] {doc.title}:\n{doc.content}" for doc in docs)
-
-        # Call inference API with RAG prompt
-        base_url = os.environ["INFERENCE_BASE_URL"].rstrip("/")
-        inference_response = httpx.post(
-            f"{base_url}/chat/completions",
-            json={
-                "model": "fake-chat",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a helpful assistant. Answer questions based only on "
-                            "the provided documents. When citing information, include "
-                            "[Document ID] references. If the documents don't contain the "
-                            "answer, say so clearly."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Documents:\n{context}\n\nQuestion: {req.question}",
-                    },
-                ],
-            },
+        return AnswerResponse(
+            answer=result.answer,
+            answered=result.answered,
+            citations=[
+                CitationResponse(
+                    document_id=passage.document.id,
+                    document_title=passage.document.title,
+                    text=passage.text,
+                    start_offset=passage.start_offset,
+                    end_offset=passage.end_offset,
+                )
+                for passage in result.citations
+            ],
         )
-        inference_response.raise_for_status()
-        inference_data = inference_response.json()
-
-        answer_text = inference_data["choices"][0]["message"]["content"]
-
-        # Extract citations by finding referenced documents in the answer
-        # and locating relevant passages in their content
-        citations = []
-        for doc in docs:
-            if f"[Document {doc.id}]" in answer_text:
-                # Find the most relevant passage: extract a sentence or phrase
-                # containing keywords from the answer that also appear in the doc
-                passage = _extract_best_passage(doc.content, answer_text)
-                if passage and passage["text"]:
-                    citations.append(
-                        CitationResponse(
-                            document_id=doc.id,
-                            text=passage["text"],
-                            start_offset=passage["start"],
-                            end_offset=passage["end"],
-                        )
-                    )
-
-        return AnswerResponse(answer=answer_text, citations=citations)
 
     return app
 
 
-def _extract_best_passage(content: str, answer: str) -> Optional[dict[str, Any]]:
-    """Extract a passage from content that relates to the answer.
+def _require_collection(collection_id: int) -> None:
+    if not CollectionRepository.get_by_id(collection_id):
+        raise HTTPException(status_code=404, detail="Collection not found")
 
-    Returns a dict with 'text', 'start', and 'end' keys, or None if no passage found.
-    """
-    # Split content into sentences
-    sentences = [s.strip() for s in content.split(". ") if s.strip()]
-    if not sentences:
-        return None
 
-    # Find the sentence that best overlaps with the answer
-    best_sentence = None
-    best_overlap = 0
+def _ingest(collection_id: int, title: str, content: str) -> DocumentResponse:
+    doc = DocumentRepository.create(collection_id, title, content)
+    return DocumentResponse(id=doc.id, collection_id=doc.collection_id, title=doc.title)
 
-    for sentence in sentences:
-        # Count word overlap between sentence and answer
-        sentence_words = set(sentence.lower().split())
-        answer_words = set(answer.lower().split())
-        overlap = len(sentence_words & answer_words)
 
-        if overlap > best_overlap:
-            best_overlap = overlap
-            best_sentence = sentence
-
-    if best_sentence is None:
-        # Fallback: return first sentence
-        best_sentence = sentences[0]
-
-    # Find position in original content
-    start_offset = content.find(best_sentence)
-    if start_offset == -1:
-        start_offset = 0
-
-    end_offset = start_offset + len(best_sentence)
-
-    return {"text": best_sentence, "start": start_offset, "end": end_offset}
+def _complete(messages: list[dict[str, str]]) -> str:
+    """Ask the inference server for a chat completion. The model is offered no tools."""
+    model = os.environ.get("INFERENCE_MODEL")
+    if not model:
+        raise HTTPException(status_code=503, detail="No inference model is configured")
+    base_url = os.environ["INFERENCE_BASE_URL"].rstrip("/")
+    try:
+        response = httpx.post(
+            f"{base_url}/chat/completions",
+            json={"model": model, "messages": messages},
+            timeout=INFERENCE_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return str(response.json()["choices"][0]["message"]["content"])
+    except (httpx.HTTPError, KeyError, IndexError, ValueError) as error:
+        raise HTTPException(status_code=502, detail="Inference server failed") from error
 
 
 app = create_app()

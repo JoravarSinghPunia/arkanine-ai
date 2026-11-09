@@ -33,6 +33,7 @@ services:
     environment:
       DATABASE_URL: postgresql://arkanine:arkanine@db:5432/arkanine
       INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-http://fake-inference:8080/v1}
+      INFERENCE_MODEL: ${INFERENCE_MODEL:-fake-chat}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
