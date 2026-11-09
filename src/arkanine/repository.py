@@ -8,6 +8,10 @@ import psycopg
 from arkanine.models import Collection, Document
 
 
+class DuplicateCollectionName(Exception):
+    """A Collection with this name already exists."""
+
+
 def _execute_query(sql: str, params: tuple[object, ...], fetch_one: bool = False) -> Any:
     """Execute a query and commit, returning one or all rows."""
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
@@ -24,11 +28,14 @@ class CollectionRepository:
     @staticmethod
     def create(name: str) -> Collection:
         """Create a new collection."""
-        row = _execute_query(
-            "INSERT INTO collections (name) VALUES (%s) RETURNING id, name",
-            (name,),
-            fetch_one=True,
-        )
+        try:
+            row = _execute_query(
+                "INSERT INTO collections (name) VALUES (%s) RETURNING id, name",
+                (name,),
+                fetch_one=True,
+            )
+        except psycopg.errors.UniqueViolation as error:
+            raise DuplicateCollectionName(name) from error
         if not row:
             raise RuntimeError("Failed to create collection")
         return Collection(id=row[0], name=row[1])
@@ -63,6 +70,21 @@ class DocumentRepository:
         )
         if not row:
             raise RuntimeError("Failed to create document")
+        return Document(id=row[0], collection_id=row[1], title=row[2], content=row[3])
+
+    @staticmethod
+    def get(collection_id: int, document_id: int) -> Optional[Document]:
+        """Get a document by ID, only if it belongs to the given collection."""
+        row = _execute_query(
+            (
+                "SELECT id, collection_id, title, content FROM documents "
+                "WHERE collection_id = %s AND id = %s"
+            ),
+            (collection_id, document_id),
+            fetch_one=True,
+        )
+        if not row:
+            return None
         return Document(id=row[0], collection_id=row[1], title=row[2], content=row[3])
 
     @staticmethod

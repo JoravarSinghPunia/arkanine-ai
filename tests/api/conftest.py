@@ -1,8 +1,8 @@
 import os
-from collections.abc import Iterator
+import uuid
+from collections.abc import Callable, Iterator
 
 import httpx
-import psycopg
 import pytest
 
 API_URL = os.environ.get("ARKANINE_API_URL", "http://localhost:8000")
@@ -21,20 +21,24 @@ def fake_inference() -> Iterator[httpx.Client]:
         yield client
 
 
-@pytest.fixture(autouse=True)
-def cleanup_database() -> Iterator[None]:
-    """Clean up database before each test."""
-    db_url = os.environ.get(
-        "DATABASE_URL", "postgresql://arkanine:arkanine@localhost:5432/arkanine"
-    )
-    try:
-        with psycopg.connect(db_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute("TRUNCATE TABLE documents CASCADE")
-                cur.execute("TRUNCATE TABLE collections CASCADE")
-                conn.commit()
-    except Exception:
-        # Ignore errors during cleanup
-        pass
+@pytest.fixture
+def collection_id(api: httpx.Client) -> int:
+    """A fresh, empty Collection."""
+    response = api.post("/collections", json={"name": f"collection-{uuid.uuid4()}"})
+    response.raise_for_status()
+    return int(response.json()["id"])
 
-    yield
+
+@pytest.fixture
+def ingest(api: httpx.Client, collection_id: int) -> Callable[[str, str], int]:
+    """Ingest a text document into the fresh Collection and return its id."""
+
+    def _ingest(title: str, content: str) -> int:
+        response = api.post(
+            f"/collections/{collection_id}/documents",
+            json={"title": title, "content": content},
+        )
+        response.raise_for_status()
+        return int(response.json()["id"])
+
+    return _ingest
