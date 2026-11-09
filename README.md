@@ -134,16 +134,16 @@ Out of scope for the MVP: workflows and agents, OCR, SSO, fine-tuning, data dele
 
 ## Getting started
 
-Nothing is built yet. These are the planned entry points; each prints "not implemented yet" until its ticket lands.
+Needs Python 3.9+ and Docker with Compose. `make bundle` and `make airgap-test` print "not implemented yet" until their tickets land.
 
-| Command            | Purpose                                |
-| ------------------ | -------------------------------------- |
-| `make setup`       | Install dependencies                   |
-| `make dev`         | Run the stack locally                  |
-| `make test`        | Run the test suite                     |
-| `make lint`        | Run linters and type checks            |
-| `make bundle`      | Build the signed offline bundle        |
-| `make airgap-test` | Run the suite with networking disabled |
+| Command            | Purpose                                                                         |
+| ------------------ | ------------------------------------------------------------------------------- |
+| `make setup`       | Install dependencies into `.venv`                                               |
+| `make dev`         | Run the stack locally; the API health check is at `localhost:8000/health`       |
+| `make test`        | Run the API suite against a throwaway Compose stack and a fake inference server |
+| `make lint`        | Run linters and type checks                                                     |
+| `make bundle`      | Build the signed offline bundle                                                 |
+| `make airgap-test` | Run the suite with networking disabled                                          |
 
 A laptop or Mac with small quantised models is enough for demos. Pilots on real documents expect a single customer-supplied GPU server. See [GLOSSARY.md](GLOSSARY.md) for the shared vocabulary and [docs/adr/](docs/adr/) for architecture decisions.
 
