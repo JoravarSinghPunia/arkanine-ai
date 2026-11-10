@@ -1,6 +1,8 @@
 """Uploading each supported file type, and rejecting the ones Arkanine can't read."""
 
 import io
+import zipfile
+from typing import Optional
 
 import docx
 import httpx
@@ -9,18 +11,36 @@ import pytest
 QUESTION = {"question": "What causes tides?"}
 
 
-def _pdf(*lines: str) -> bytes:
-    """A one-page PDF with `lines` as real text; with no lines it has no text layer."""
-    text = " 0 -16 Td ".join(f"({line}) Tj" for line in lines)
-    stream = f"BT /F1 12 Tf 72 720 Td {text} ET".encode() if lines else b""
+SCANNED_PAGE = None
+
+
+def _pdf_pages(*pages: Optional[list[str]]) -> bytes:
+    """A PDF with one page per item: lines of real text, or SCANNED_PAGE (an image only)."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-        b"/Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+        b"",  # the page tree, filled in once the page object numbers are known
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray "
+        b"/BitsPerComponent 8 /Length 1 >>\nstream\n\x80\nendstream",
     ]
+    kids = []
+    for lines in pages:
+        if lines is SCANNED_PAGE:
+            stream = b"q 612 0 0 792 0 0 cm /Im1 Do Q"
+        else:
+            text = " 0 -16 Td ".join(f"({line}) Tj" for line in lines)
+            stream = f"BT /F1 12 Tf 72 720 Td {text} ET".encode() if lines else b""
+        kids.append(len(objects) + 1)
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R "
+            b"/Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R >> >> >>"
+            % (len(objects) + 2)
+        )
+        objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+    objects[1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
+        b" ".join(b"%d 0 R" % kid for kid in kids),
+        len(kids),
+    )
     pdf = b"%PDF-1.4\n"
     offsets = []
     for number, body in enumerate(objects, start=1):
@@ -34,6 +54,11 @@ def _pdf(*lines: str) -> bytes:
         xref,
     )
     return pdf
+
+
+def _pdf(*lines: str) -> bytes:
+    """A one-page PDF with `lines` as real text; with no lines it has no text layer."""
+    return _pdf_pages(list(lines))
 
 
 def _upload(api: httpx.Client, collection_id: int, filename: str, data: bytes) -> httpx.Response:
@@ -129,3 +154,57 @@ def test_a_corrupt_pdf_or_word_document_is_reported_unreadable(
 
     assert response.status_code == 422
     assert filename in response.json()["detail"]
+
+
+def test_a_pdf_with_some_scanned_pages_is_rejected_rather_than_partly_ingested(
+    api: httpx.Client, collection_id: int
+) -> None:
+    pdf = _pdf_pages(["Tides are caused by the Moon."], SCANNED_PAGE)
+
+    response = _upload(api, collection_id, "contract.pdf", pdf)
+
+    assert response.status_code == 422
+    assert "page 2" in response.json()["detail"]
+    assert "scanned" in response.json()["detail"]
+
+
+def test_a_blank_page_does_not_make_a_pdf_count_as_scanned(
+    api: httpx.Client, collection_id: int
+) -> None:
+    pdf = _pdf_pages(["Tides are caused by the Moon."], [])
+
+    assert _upload(api, collection_id, "ocean.pdf", pdf).status_code == 201
+
+
+def test_an_upload_over_the_size_limit_is_rejected(api: httpx.Client, collection_id: int) -> None:
+    too_big = b"a" * (25 * 1024 * 1024 + 1)
+
+    response = _upload(api, collection_id, "huge.txt", too_big)
+
+    assert response.status_code == 413
+    assert "huge.txt" in response.json()["detail"]
+
+
+def test_a_word_document_that_expands_too_far_is_rejected(
+    api: httpx.Client, collection_id: int
+) -> None:
+    document = docx.Document()
+    document.add_paragraph("Tides are caused by the Moon.")
+    original = io.BytesIO()
+    document.save(original)
+    bomb = io.BytesIO()
+    with (
+        zipfile.ZipFile(original) as source,
+        zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as target,
+    ):
+        for item in source.infolist():
+            target.writestr(item, source.read(item.filename))
+        with target.open("word/media/padding.bin", "w") as padding:
+            for _ in range(101):
+                padding.write(bytes(1024 * 1024))
+
+    response = _upload(api, collection_id, "bomb.docx", bomb.getvalue())
+
+    assert len(bomb.getvalue()) < 1024 * 1024
+    assert response.status_code == 422
+    assert "bomb.docx" in response.json()["detail"]

@@ -16,6 +16,7 @@ from arkanine.answering import (
 )
 from arkanine.db import create_schema
 from arkanine.extraction import (
+    MAX_UPLOAD_BYTES,
     SUPPORTED_EXTENSIONS,
     UnreadableFile,
     UnsupportedFileType,
@@ -299,8 +300,13 @@ def create_app() -> FastAPI:
         """Ingest an uploaded file into a collection, titled by its filename."""
         _require_role(user, collection_id, "editor")
         filename = file.filename or "untitled"
+        data = file.file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            reason = f"larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB upload limit"
+            DocumentRepository.record_failure(collection_id, filename, reason)
+            raise HTTPException(status_code=413, detail=f"{filename}: {reason}")
         try:
-            content = extract_text(filename, file.file.read())
+            content = extract_text(filename, data)
         except UnsupportedFileType as error:
             reason = f"{error}; supported: " + ", ".join(SUPPORTED_EXTENSIONS)
             DocumentRepository.record_failure(collection_id, filename, reason)

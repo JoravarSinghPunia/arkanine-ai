@@ -111,9 +111,7 @@ class DocumentRepository:
             "SELECT id, title, status, error FROM documents WHERE collection_id = %s ORDER BY id",
             (collection_id,),
         )
-        return [
-            DocumentSummary(id=row[0], title=row[1], status=row[2], error=row[3]) for row in rows
-        ]
+        return [_document_summary(row) for row in rows]
 
     @staticmethod
     def get(collection_id: int, document_id: int) -> Optional[Document]:
@@ -157,6 +155,10 @@ class DocumentRepository:
 
 class DuplicateUsername(Exception):
     """A user with this username already exists."""
+
+
+def _document_summary(row: tuple[Any, ...]) -> DocumentSummary:
+    return DocumentSummary(id=row[0], title=row[1], status=row[2], error=row[3])
 
 
 def _user(row: tuple[Any, ...]) -> User:
