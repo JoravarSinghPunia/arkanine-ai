@@ -93,7 +93,7 @@ flowchart TB
 | Tampered software         | Signed bundles, with the public key shipped in the install and verified offline.                                                                                       |
 | Malicious documents       | Document text is content, never instructions. The model has no tools, web access or code execution.                                                                    |
 | Unauthorised access       | Retrieval filters by the asking user's Collections before ranking, so inaccessible content never reaches the model or citations.                                       |
-| Model supply chain        | Only open-weight models from US and European labs, with a published provenance list ([ADR 0002](docs/adr/0002-model-provenance.md)).                                   |
+| Model supply chain        | Only open-weight models from US and European labs, with a [published provenance list](docs/models.md) ([ADR 0002](docs/adr/0002-model-provenance.md)).                                |
 
 "Air-gapped" here means verified with networking disabled, not accredited for classified networks. Not in the MVP: SSO, permission inheritance from source systems, data deletion and formal accreditation.
 
@@ -140,12 +140,13 @@ Needs Python 3.9+ and Docker with Compose. `make bundle` and `make airgap-test` 
 | ------------------ | ------------------------------------------------------------------------------- |
 | `make setup`       | Install dependencies into `.venv`                                               |
 | `make dev`         | Run the stack locally; the API health check is at `localhost:8000/health`       |
+| `make dev BACKEND=ollama` | Run it against a real model server: `ollama`, `llamacpp` or `vllm`       |
 | `make test`        | Run the API suite against a throwaway Compose stack and a fake inference server |
 | `make lint`        | Run linters and type checks                                                     |
 | `make bundle`      | Build the signed offline bundle                                                 |
 | `make airgap-test` | Run the suite with networking disabled                                          |
 
-A laptop or Mac with small quantised models is enough for demos. Pilots on real documents expect a single customer-supplied GPU server. See [GLOSSARY.md](GLOSSARY.md) for the shared vocabulary and [docs/adr/](docs/adr/) for architecture decisions.
+A laptop or Mac with small quantised models is enough for demos. Pilots on real documents expect a single customer-supplied GPU server. [docs/models.md](docs/models.md) lists the shipped models and their origin, how to configure each backend, and the hardware spec for each tier. See [GLOSSARY.md](GLOSSARY.md) for the shared vocabulary and [docs/adr/](docs/adr/) for architecture decisions.
 
 The API needs a signed-in user for everything except `/health`. On startup it creates the administrator named by `ARKANINE_ADMIN_USERNAME` and `ARKANINE_ADMIN_PASSWORD` if that account doesn't already exist. `make dev` uses `admin` / `arkanine-dev-admin` unless you set your own. Sign in with `POST /sessions` and send the returned token as `Authorization: Bearer <token>`. The administrator creates accounts with `POST /users` and grants a `reader` or `editor` Role per Collection with `PUT /collections/{id}/grants/{user_id}`. `DELETE` on the same path revokes it, effective from the user's next request. Editors upload text-based PDF, DOCX, HTML, Markdown and plain text, up to 25 MB, with `POST /collections/{id}/documents/upload`. Scanned documents, images, spreadsheets and email are rejected with a reason. `GET /collections/{id}/documents` lists each document as `ready` or `failed`, and gives the reason for each failure.
 

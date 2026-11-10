@@ -1,12 +1,14 @@
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Annotated, Optional
 
-import httpx
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, field_validator
 
+from arkanine import inference
 from arkanine.answering import (
     NOT_FOUND_ANSWER,
     NOT_FOUND_ANYWHERE_ANSWER,
@@ -23,19 +25,20 @@ from arkanine.extraction import (
     check_document_text,
     extract_text,
 )
-from arkanine.models import Document, DocumentStatus, Role, User
-from arkanine.passages import find_relevant_passages
+from arkanine.models import DocumentStatus, Role, User
+from arkanine.passages import passage_spans
 from arkanine.repository import (
     AccessRepository,
     CollectionRepository,
     DocumentRepository,
     DuplicateCollectionName,
     DuplicateUsername,
+    PassageRepository,
     UserRepository,
 )
 
 CHECK_TIMEOUT_SECONDS = 2
-INFERENCE_TIMEOUT_SECONDS = 120
+PASSAGES_PER_ANSWER = 8
 
 
 class SignInRequest(BaseModel):
@@ -172,15 +175,6 @@ def _check_database() -> str:
     return "ok"
 
 
-def _check_inference() -> str:
-    try:
-        base_url = os.environ["INFERENCE_BASE_URL"].rstrip("/")
-        httpx.get(f"{base_url}/models", timeout=CHECK_TIMEOUT_SECONDS).raise_for_status()
-    except (KeyError, httpx.HTTPError):
-        return "unavailable"
-    return "ok"
-
-
 _bearer = HTTPBearer(auto_error=False)
 
 
@@ -228,7 +222,11 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health(response: Response) -> dict[str, object]:
-        checks = {"database": _check_database(), "inference": _check_inference()}
+        checks = {
+            "database": _check_database(),
+            "inference": inference.chat_endpoint().check(),
+            "embeddings": inference.embedding_endpoint().check(),
+        }
         healthy = all(state == "ok" for state in checks.values())
         if not healthy:
             response.status_code = 503
@@ -345,8 +343,7 @@ def create_app() -> FastAPI:
     ) -> AnswerResponse:
         """Answer a question using documents in a collection."""
         _require_role(user, collection_id, "reader")
-        docs = DocumentRepository.get_by_collection(collection_id)
-        return _answer(docs, req.question, NOT_FOUND_ANSWER)
+        return _answer([collection_id], req.question, NOT_FOUND_ANSWER)
 
     @app.post("/answer")
     def answer_across_collections(
@@ -354,7 +351,7 @@ def create_app() -> FastAPI:
     ) -> AnswerResponse:
         """Answer a question from the Collections the user can access.
 
-        Documents are filtered to those Collections before ranking, so nothing the user
+        Passages are filtered to those Collections before ranking, so nothing the user
         cannot access ever reaches the model or the citations.
         """
         accessible = {c.id for c in AccessRepository.accessible_collections(user)}
@@ -364,8 +361,7 @@ def create_app() -> FastAPI:
             collection_ids = req.collection_ids
         else:
             raise HTTPException(status_code=404, detail="Collection not found")
-        docs = DocumentRepository.get_by_collections(collection_ids) if collection_ids else []
-        return _answer(docs, req.question, NOT_FOUND_ANYWHERE_ANSWER)
+        return _answer(collection_ids, req.question, NOT_FOUND_ANYWHERE_ANSWER)
 
     return app
 
@@ -388,17 +384,46 @@ def _require_collection(collection_id: int) -> None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
 
+@contextmanager
+def _inference_errors(kind: str) -> Iterator[None]:
+    try:
+        yield
+    except inference.NotConfigured:
+        raise HTTPException(status_code=503, detail=f"No {kind} model is configured") from None
+    except inference.InferenceFailed as error:
+        raise HTTPException(status_code=502, detail=f"{kind.capitalize()} server failed") from error
+
+
+def _embedded_spans(content: str) -> list[tuple[int, int, list[float]]]:
+    spans = passage_spans(content)
+    with _inference_errors("embedding"):
+        vectors = inference.embed([content[start:end] for start, end in spans], "document")
+    return [(start, end, vector) for (start, end), vector in zip(spans, vectors)]
+
+
 def _ingest(collection_id: int, title: str, content: str) -> DocumentResponse:
-    doc = DocumentRepository.create(collection_id, title, content)
+    with _inference_errors("embedding"):
+        model = inference.embedding_model()
+    doc = DocumentRepository.create(collection_id, title, content, model, _embedded_spans(content))
     return DocumentResponse(id=doc.id, collection_id=doc.collection_id, title=doc.title)
 
 
-def _answer(docs: list[Document], question: str, not_found_answer: str) -> AnswerResponse:
-    passages = find_relevant_passages(docs, question)
+def _answer(collection_ids: list[int], question: str, not_found_answer: str) -> AnswerResponse:
+    passages = []
+    if collection_ids:
+        with _inference_errors("embedding"):
+            model = inference.embedding_model()
+        # Documents ingested before this embedding model was configured.
+        for doc in PassageRepository.unembedded_documents(collection_ids, model):
+            PassageRepository.add(doc.id, model, _embedded_spans(doc.content))
+        with _inference_errors("embedding"):
+            [query] = inference.embed([question], "query")
+        passages = PassageRepository.nearest(collection_ids, model, query, PASSAGES_PER_ANSWER)
     if not passages:
         result = not_found(not_found_answer)
     else:
-        reply = _complete(build_messages(passages, question))
+        with _inference_errors("inference"):
+            reply = inference.complete(build_messages(passages, question))
         result = parse_reply(reply, passages, not_found_answer)
 
     return AnswerResponse(
@@ -416,24 +441,6 @@ def _answer(docs: list[Document], question: str, not_found_answer: str) -> Answe
             for passage in result.citations
         ],
     )
-
-
-def _complete(messages: list[dict[str, str]]) -> str:
-    """Ask the inference server for a chat completion. The model is offered no tools."""
-    model = os.environ.get("INFERENCE_MODEL")
-    if not model:
-        raise HTTPException(status_code=503, detail="No inference model is configured")
-    base_url = os.environ["INFERENCE_BASE_URL"].rstrip("/")
-    try:
-        response = httpx.post(
-            f"{base_url}/chat/completions",
-            json={"model": model, "messages": messages},
-            timeout=INFERENCE_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        return str(response.json()["choices"][0]["message"]["content"])
-    except (httpx.HTTPError, KeyError, IndexError, ValueError) as error:
-        raise HTTPException(status_code=502, detail="Inference server failed") from error
 
 
 app = create_app()

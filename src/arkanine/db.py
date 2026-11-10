@@ -71,4 +71,19 @@ def create_schema() -> None:
                 )
                 """
             )
+            # Vectors are unsized so the embedding model, and its dimensions, can change by
+            # configuration; each passage is embedded once per model.
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS passages (
+                    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                    embedding_model TEXT NOT NULL,
+                    start_offset INTEGER NOT NULL,
+                    end_offset INTEGER NOT NULL,
+                    embedding vector NOT NULL,
+                    PRIMARY KEY (document_id, embedding_model, start_offset)
+                )
+                """
+            )
             conn.commit()

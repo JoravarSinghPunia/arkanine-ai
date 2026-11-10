@@ -11,4 +11,4 @@ def test_health_reports_ok(api: httpx.Client) -> None:
 def test_health_reports_each_dependency(api: httpx.Client) -> None:
     checks = api.get("/health").json()["checks"]
 
-    assert checks == {"database": "ok", "inference": "ok"}
+    assert checks == {"database": "ok", "inference": "ok", "embeddings": "ok"}

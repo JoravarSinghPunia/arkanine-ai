@@ -13,6 +13,10 @@ from arkanine.accounts import (
     verify_password,
 )
 from arkanine.models import Collection, Document, DocumentSummary, Role, User
+from arkanine.passages import Passage
+
+# A passage's (start offset, end offset, embedding).
+Span = tuple[int, int, list[float]]
 
 
 class DuplicateCollectionName(Exception):
@@ -77,19 +81,25 @@ class DocumentRepository:
     """Repository for Document operations."""
 
     @staticmethod
-    def create(collection_id: int, title: str, content: str) -> Document:
-        """Create a new document in a collection."""
-        row = _execute_query(
-            (
-                "INSERT INTO documents (collection_id, title, content) "
-                "VALUES (%s, %s, %s) "
-                "RETURNING id, collection_id, title, content"
-            ),
-            (collection_id, title, content),
-            fetch_one=True,
-        )
-        if not row:
-            raise RuntimeError("Failed to create document")
+    def create(
+        collection_id: int, title: str, content: str, embedding_model: str, passages: list[Span]
+    ) -> Document:
+        """Create a document together with its embedded passages, or neither."""
+        with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    (
+                        "INSERT INTO documents (collection_id, title, content) "
+                        "VALUES (%s, %s, %s) "
+                        "RETURNING id, collection_id, title, content"
+                    ),
+                    (collection_id, title, content),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise RuntimeError("Failed to create document")
+                _insert_passages(cur, row[0], embedding_model, passages)
+            conn.commit()
         return _document(row)
 
     @staticmethod
@@ -128,29 +138,74 @@ class DocumentRepository:
             return None
         return _document(row)
 
+
+def _vector(values: list[float]) -> str:
+    return "[" + ",".join(repr(float(value)) for value in values) + "]"
+
+
+def _insert_passages(
+    cur: "psycopg.Cursor[Any]", document_id: int, embedding_model: str, passages: list[Span]
+) -> None:
+    cur.executemany(
+        (
+            "INSERT INTO passages "
+            "(document_id, embedding_model, start_offset, end_offset, embedding) "
+            "VALUES (%s, %s, %s, %s, %s::vector) ON CONFLICT DO NOTHING"
+        ),
+        [
+            (document_id, embedding_model, start, end, _vector(embedding))
+            for start, end, embedding in passages
+        ],
+    )
+
+
+class PassageRepository:
+    """Embedded passages, searched by similarity to a question."""
+
     @staticmethod
-    def get_by_collection(collection_id: int) -> list[Document]:
-        """Get all documents in a collection."""
+    def unembedded_documents(collection_ids: list[int], embedding_model: str) -> list[Document]:
+        """Ready documents in the Collections with no passages for this embedding model.
+
+        These predate the model being configured, so they are embedded before searching.
+        """
         rows = _execute_query(
             (
-                "SELECT id, collection_id, title, content FROM documents "
-                "WHERE collection_id = %s AND status = 'ready' ORDER BY id"
+                "SELECT d.id, d.collection_id, d.title, d.content FROM documents d "
+                "WHERE d.collection_id = ANY(%s) AND d.status = 'ready' AND NOT EXISTS ("
+                "SELECT 1 FROM passages p "
+                "WHERE p.document_id = d.id AND p.embedding_model = %s) ORDER BY d.id"
             ),
-            (collection_id,),
+            (collection_ids, embedding_model),
         )
         return [_document(row) for row in rows]
 
     @staticmethod
-    def get_by_collections(collection_ids: list[int]) -> list[Document]:
-        """Get all documents in any of the given collections."""
+    def add(document_id: int, embedding_model: str, passages: list[Span]) -> None:
+        with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+            with conn.cursor() as cur:
+                _insert_passages(cur, document_id, embedding_model, passages)
+            conn.commit()
+
+    @staticmethod
+    def nearest(
+        collection_ids: list[int], embedding_model: str, query: list[float], limit: int
+    ) -> list[Passage]:
+        """The passages in the Collections most similar to the query, most similar first.
+
+        Filtering by Collection happens in the same query as ranking, so passages the
+        user cannot access are never candidates.
+        """
         rows = _execute_query(
             (
-                "SELECT id, collection_id, title, content FROM documents "
-                "WHERE collection_id = ANY(%s) AND status = 'ready' ORDER BY id"
+                "SELECT d.id, d.collection_id, d.title, d.content, p.start_offset, p.end_offset "
+                "FROM passages p JOIN documents d ON d.id = p.document_id "
+                "WHERE d.collection_id = ANY(%s) AND d.status = 'ready' "
+                "AND p.embedding_model = %s "
+                "ORDER BY p.embedding <=> %s::vector, d.id, p.start_offset LIMIT %s"
             ),
-            (collection_ids,),
+            (collection_ids, embedding_model, _vector(query), limit),
         )
-        return [_document(row) for row in rows]
+        return [Passage(_document(row), row[4], row[5]) for row in rows]
 
 
 class DuplicateUsername(Exception):

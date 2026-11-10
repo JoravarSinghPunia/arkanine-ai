@@ -6,7 +6,7 @@ CHAT_REQUEST = {"model": "fake-chat", "messages": [{"role": "user", "content": "
 def test_lists_models(fake_inference: httpx.Client) -> None:
     body = fake_inference.get("/v1/models").json()
 
-    assert [m["id"] for m in body["data"]] == ["fake-chat"]
+    assert [m["id"] for m in body["data"]] == ["fake-chat", "fake-embed"]
 
 
 def test_chat_completion_is_deterministic(fake_inference: httpx.Client) -> None:
