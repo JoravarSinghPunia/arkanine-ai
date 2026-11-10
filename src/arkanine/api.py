@@ -22,7 +22,7 @@ from arkanine.extraction import (
     check_document_text,
     extract_text,
 )
-from arkanine.models import Document, Role, User
+from arkanine.models import Document, DocumentStatus, Role, User
 from arkanine.passages import find_relevant_passages
 from arkanine.repository import (
     AccessRepository,
@@ -94,6 +94,15 @@ class IngestDocumentRequest(BaseModel):
             return check_document_text(value)
         except UnreadableFile as error:
             raise ValueError(str(error)) from None
+
+
+class DocumentStatusResponse(BaseModel):
+    """A document in a collection's list. `error` says why a failed upload was rejected."""
+
+    id: int
+    title: str
+    status: DocumentStatus
+    error: Optional[str]
 
 
 class DocumentResponse(BaseModel):
@@ -292,16 +301,24 @@ def create_app() -> FastAPI:
         filename = file.filename or "untitled"
         try:
             content = extract_text(filename, file.file.read())
-        except UnsupportedFileType:
-            raise HTTPException(
-                status_code=415,
-                detail=f"{filename}: unsupported file type; supported: "
-                + ", ".join(SUPPORTED_EXTENSIONS),
-            ) from None
+        except UnsupportedFileType as error:
+            reason = f"{error}; supported: " + ", ".join(SUPPORTED_EXTENSIONS)
+            DocumentRepository.record_failure(collection_id, filename, reason)
+            raise HTTPException(status_code=415, detail=f"{filename}: {reason}") from None
         except UnreadableFile as error:
+            DocumentRepository.record_failure(collection_id, filename, str(error))
             raise HTTPException(status_code=422, detail=f"{filename}: {error}") from None
 
         return _ingest(collection_id, filename, content)
+
+    @app.get("/collections/{collection_id}/documents")
+    def list_documents(collection_id: int, user: CurrentUser) -> list[DocumentStatusResponse]:
+        """List a collection's documents with their ingestion status, oldest first."""
+        _require_role(user, collection_id, "reader")
+        return [
+            DocumentStatusResponse(id=d.id, title=d.title, status=d.status, error=d.error)
+            for d in DocumentRepository.list_by_collection(collection_id)
+        ]
 
     @app.get("/collections/{collection_id}/documents/{document_id}")
     def get_document(
