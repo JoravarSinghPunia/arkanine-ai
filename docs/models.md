@@ -4,7 +4,7 @@ Arkanine sends every model call through one OpenAI-compatible interface: chat co
 
 ## Shipped models
 
-Arkanine ships only open-weight models from US and European labs ([ADR 0002](adr/0002-model-provenance.md)). No Chinese-origin weights are included, whatever their benchmark scores. Quantised files are made from the original weights listed here, and third-party conversions are not shipped. The machine-readable list is [models/provenance.json](../models/provenance.json), and a test checks it against this table and against every backend configuration.
+Arkanine ships only open-weight models from US and European labs ([ADR 0002](adr/0002-model-provenance.md)). No Chinese-origin weights are included, whatever their benchmark scores. Quantised files in the Offline bundle are made from the original weights listed here with llama.cpp's own tools, and third-party conversions are not shipped. Ollama's library tags used during development are a convenience, not what ships. The machine-readable list is [models/provenance.json](../models/provenance.json), and a test checks it against this table and against every backend configuration.
 
 | Model | Lab | Origin | Role | Tier | Licence | Original weights |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -42,6 +42,14 @@ make dev BACKEND=ollama
 ```
 
 ### llama.cpp (laptop or Mac)
+
+Build the GGUF files from the original weights, using the scripts that come with llama.cpp:
+
+```sh
+python convert_hf_to_gguf.py Llama-3.2-3B-Instruct --outtype f16 --outfile Llama-3.2-3B-Instruct-F16.gguf
+llama-quantize Llama-3.2-3B-Instruct-F16.gguf Llama-3.2-3B-Instruct-Q4_K_M.gguf Q4_K_M
+python convert_hf_to_gguf.py nomic-embed-text-v1.5 --outtype f16 --outfile nomic-embed-text-v1.5.f16.gguf
+```
 
 `llama-server` serves one model per process, so run one for chat and one for embeddings:
 

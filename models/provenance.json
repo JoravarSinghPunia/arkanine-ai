@@ -1,5 +1,5 @@
 {
-  "policy": "Only open-weight models from US and European labs are shipped (docs/adr/0002-model-provenance.md). Quantised files are made from the original weights listed here; third-party conversions are not shipped.",
+  "policy": "Only open-weight models from US and European labs are shipped (docs/adr/0002-model-provenance.md). Quantised files in the bundle are made from the original weights listed here with llama.cpp's own tools; third-party conversions are not shipped.",
   "models": [
     {
       "name": "Llama 3.2 3B Instruct",
