@@ -1,5 +1,5 @@
 import os
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Optional
 
 import httpx
 import psycopg
@@ -22,7 +22,7 @@ from arkanine.extraction import (
     check_document_text,
     extract_text,
 )
-from arkanine.models import Document, User
+from arkanine.models import Document, Role, User
 from arkanine.passages import find_relevant_passages
 from arkanine.repository import (
     AccessRepository,
@@ -47,18 +47,15 @@ class SessionResponse(BaseModel):
 
 
 class CreateUserRequest(BaseModel):
+    """Request to create a local account. Only the configured administrator is an admin."""
+
     username: str
     password: str
-    is_admin: bool = False
 
 
 class UserResponse(BaseModel):
     id: int
     username: str
-    is_admin: bool
-
-
-Role = Literal["reader", "editor"]
 
 
 class GrantRequest(BaseModel):
@@ -194,9 +191,13 @@ def current_user(
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
-def _require_admin(user: User) -> None:
+def admin_user(user: CurrentUser) -> User:
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Administrator access required")
+    return user
+
+
+AdminUser = Annotated[User, Depends(admin_user)]
 
 
 def _bootstrap_admin() -> None:
@@ -240,21 +241,19 @@ def create_app() -> FastAPI:
         ]
 
     @app.post("/users", status_code=201)
-    def create_user(req: CreateUserRequest, user: CurrentUser) -> UserResponse:
+    def create_user(req: CreateUserRequest, _: AdminUser) -> UserResponse:
         """Create a local account."""
-        _require_admin(user)
         try:
-            created = UserRepository.create(req.username, req.password, req.is_admin)
+            created = UserRepository.create(req.username, req.password)
         except DuplicateUsername:
             raise HTTPException(status_code=409, detail="Username already exists") from None
-        return UserResponse(id=created.id, username=created.username, is_admin=created.is_admin)
+        return UserResponse(id=created.id, username=created.username)
 
     @app.put("/collections/{collection_id}/grants/{user_id}")
     def grant_access(
-        collection_id: int, user_id: int, req: GrantRequest, user: CurrentUser
+        collection_id: int, user_id: int, req: GrantRequest, _: AdminUser
     ) -> GrantResponse:
         """Give a user a role on a Collection, replacing any role they had."""
-        _require_admin(user)
         _require_collection(collection_id)
         if not UserRepository.get_by_id(user_id):
             raise HTTPException(status_code=404, detail="User not found")
@@ -262,16 +261,14 @@ def create_app() -> FastAPI:
         return GrantResponse(user_id=user_id, collection_id=collection_id, role=req.role)
 
     @app.delete("/collections/{collection_id}/grants/{user_id}", status_code=204)
-    def revoke_access(collection_id: int, user_id: int, user: CurrentUser) -> Response:
+    def revoke_access(collection_id: int, user_id: int, _: AdminUser) -> Response:
         """Remove a user's access to a Collection. Revoking absent access is a no-op."""
-        _require_admin(user)
         AccessRepository.revoke(user_id, collection_id)
         return Response(status_code=204)
 
     @app.post("/collections", status_code=201)
-    def create_collection(req: CreateCollectionRequest, user: CurrentUser) -> CollectionResponse:
+    def create_collection(req: CreateCollectionRequest, _: AdminUser) -> CollectionResponse:
         """Create a new collection."""
-        _require_admin(user)
         try:
             collection = CollectionRepository.create(req.name)
         except DuplicateCollectionName:

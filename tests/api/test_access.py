@@ -203,3 +203,20 @@ def test_a_user_with_no_collections_is_told_there_is_no_answer(
     assert response.status_code == 200
     assert response.json()["answered"] is False
     assert response.json()["citations"] == []
+
+
+def test_accounts_created_through_the_api_are_never_administrators(
+    anon: httpx.Client, api: httpx.Client
+) -> None:
+    credentials = {"username": f"user-{uuid.uuid4()}", "password": "pw", "is_admin": True}
+
+    created = api.post("/users", json=credentials)
+    token = anon.post("/sessions", json=credentials).json()["token"]
+    as_new_user = anon.post(
+        "/collections",
+        json={"name": f"collection-{uuid.uuid4()}"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert created.status_code == 201
+    assert as_new_user.status_code == 403

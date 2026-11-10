@@ -1,7 +1,7 @@
 """Repository layer for database operations."""
 
 import os
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import psycopg
 
@@ -12,7 +12,7 @@ from arkanine.accounts import (
     new_token,
     verify_password,
 )
-from arkanine.models import Collection, Document, User
+from arkanine.models import Collection, Document, Role, User
 
 
 class DuplicateCollectionName(Exception):
@@ -27,6 +27,10 @@ def _execute_query(sql: str, params: tuple[object, ...], fetch_one: bool = False
             result = cur.fetchone() if fetch_one else cur.fetchall()
             conn.commit()
     return result
+
+
+def _collection(row: tuple[Any, ...]) -> Collection:
+    return Collection(id=row[0], name=row[1])
 
 
 def _document(row: tuple[Any, ...]) -> Document:
@@ -49,7 +53,7 @@ class CollectionRepository:
             raise DuplicateCollectionName(name) from error
         if not row:
             raise RuntimeError("Failed to create collection")
-        return Collection(id=row[0], name=row[1])
+        return _collection(row)
 
     @staticmethod
     def get_by_id(collection_id: int) -> Optional[Collection]:
@@ -61,12 +65,12 @@ class CollectionRepository:
         )
         if not row:
             return None
-        return Collection(id=row[0], name=row[1])
+        return _collection(row)
 
     @staticmethod
     def list_all() -> list[Collection]:
         rows = _execute_query("SELECT id, name FROM collections ORDER BY id", ())
-        return [Collection(id=row[0], name=row[1]) for row in rows]
+        return [_collection(row) for row in rows]
 
 
 class DocumentRepository:
@@ -140,14 +144,15 @@ class UserRepository:
     """Repository for local accounts and their sessions."""
 
     @staticmethod
-    def create(username: str, password: str, is_admin: bool = False) -> User:
+    def create(username: str, password: str) -> User:
+        """Create an account that is not an administrator."""
         try:
             row = _execute_query(
                 (
-                    "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s) "
+                    "INSERT INTO users (username, password_hash) VALUES (%s, %s) "
                     "RETURNING id, username, is_admin"
                 ),
-                (username, hash_password(password), is_admin),
+                (username, hash_password(password)),
                 fetch_one=True,
             )
         except psycopg.errors.UniqueViolation as error:
@@ -206,7 +211,7 @@ class AccessRepository:
     """Per-Collection roles. Administrators implicitly hold every role on every Collection."""
 
     @staticmethod
-    def grant(user_id: int, collection_id: int, role: str) -> None:
+    def grant(user_id: int, collection_id: int, role: Role) -> None:
         _execute_query(
             (
                 "INSERT INTO collection_grants (user_id, collection_id, role) VALUES (%s, %s, %s) "
@@ -228,7 +233,7 @@ class AccessRepository:
         )
 
     @staticmethod
-    def role(user: User, collection_id: int) -> Optional[str]:
+    def role(user: User, collection_id: int) -> Optional[Role]:
         """The user's role on an existing Collection, or None if they have no access."""
         if user.is_admin:
             return "editor" if CollectionRepository.get_by_id(collection_id) else None
@@ -237,7 +242,7 @@ class AccessRepository:
             (user.id, collection_id),
             fetch_one=True,
         )
-        return str(row[0]) if row else None
+        return cast(Role, row[0]) if row else None
 
     @staticmethod
     def accessible_collections(user: User) -> list[Collection]:
@@ -251,4 +256,4 @@ class AccessRepository:
             ),
             (user.id,),
         )
-        return [Collection(id=row[0], name=row[1]) for row in rows]
+        return [_collection(row) for row in rows]
