@@ -12,7 +12,7 @@ from arkanine.accounts import (
     new_token,
     verify_password,
 )
-from arkanine.models import Collection, Document, Role, User
+from arkanine.models import Collection, Document, DocumentSummary, Role, User
 
 
 class DuplicateCollectionName(Exception):
@@ -93,12 +93,33 @@ class DocumentRepository:
         return _document(row)
 
     @staticmethod
+    def record_failure(collection_id: int, title: str, error: str) -> None:
+        """Keep a rejected upload in the document list, with the reason it was rejected."""
+        _execute_query(
+            (
+                "INSERT INTO documents (collection_id, title, content, status, error) "
+                "VALUES (%s, %s, '', 'failed', %s) RETURNING id"
+            ),
+            (collection_id, title, error),
+            fetch_one=True,
+        )
+
+    @staticmethod
+    def list_by_collection(collection_id: int) -> list[DocumentSummary]:
+        """Every document in a collection, including failed uploads, oldest first."""
+        rows = _execute_query(
+            "SELECT id, title, status, error FROM documents WHERE collection_id = %s ORDER BY id",
+            (collection_id,),
+        )
+        return [_document_summary(row) for row in rows]
+
+    @staticmethod
     def get(collection_id: int, document_id: int) -> Optional[Document]:
         """Get a document by ID, only if it belongs to the given collection."""
         row = _execute_query(
             (
                 "SELECT id, collection_id, title, content FROM documents "
-                "WHERE collection_id = %s AND id = %s"
+                "WHERE collection_id = %s AND id = %s AND status = 'ready'"
             ),
             (collection_id, document_id),
             fetch_one=True,
@@ -113,7 +134,7 @@ class DocumentRepository:
         rows = _execute_query(
             (
                 "SELECT id, collection_id, title, content FROM documents "
-                "WHERE collection_id = %s ORDER BY id"
+                "WHERE collection_id = %s AND status = 'ready' ORDER BY id"
             ),
             (collection_id,),
         )
@@ -125,7 +146,7 @@ class DocumentRepository:
         rows = _execute_query(
             (
                 "SELECT id, collection_id, title, content FROM documents "
-                "WHERE collection_id = ANY(%s) ORDER BY id"
+                "WHERE collection_id = ANY(%s) AND status = 'ready' ORDER BY id"
             ),
             (collection_ids,),
         )
@@ -134,6 +155,10 @@ class DocumentRepository:
 
 class DuplicateUsername(Exception):
     """A user with this username already exists."""
+
+
+def _document_summary(row: tuple[Any, ...]) -> DocumentSummary:
+    return DocumentSummary(id=row[0], title=row[1], status=row[2], error=row[3])
 
 
 def _user(row: tuple[Any, ...]) -> User:

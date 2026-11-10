@@ -31,6 +31,15 @@ def create_schema() -> None:
                 )
                 """
             )
+            # A failed upload is kept, without content, so its reason can be listed.
+            cur.execute(
+                """
+                ALTER TABLE documents
+                    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ready'
+                        CHECK (status IN ('ready', 'failed')),
+                    ADD COLUMN IF NOT EXISTS error TEXT
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (

@@ -174,11 +174,11 @@ def test_uploaded_plain_text_file_is_ingested(api: httpx.Client, collection_id: 
 def test_rejects_an_unsupported_file_type_clearly(api: httpx.Client, collection_id: int) -> None:
     response = api.post(
         f"/collections/{collection_id}/documents/upload",
-        files={"file": ("report.pdf", b"%PDF-1.7", "application/pdf")},
+        files={"file": ("archive.zip", b"PK\x03\x04", "application/zip")},
     )
 
     assert response.status_code == 415
-    assert "report.pdf" in response.json()["detail"]
+    assert "archive.zip" in response.json()["detail"]
 
 
 @pytest.mark.parametrize("data", [b"\xff\xfebad", b"null\x00byte", b"", b"  \n\n "], ids=str)
