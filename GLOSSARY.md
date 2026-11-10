@@ -32,6 +32,10 @@ _Avoid_: Continuous learning, auto-training, evolution
 A named set of documents ingested into a Private AI system, and the unit to which access is granted.
 _Avoid_: Library, corpus, index, folder
 
+**Role**:
+What a user may do in one Collection: a reader can ask questions and open documents; an editor can also add documents. Administrators can do everything in every Collection.
+_Avoid_: Permission, ACL, scope
+
 **Eval set**:
 The approved questions, with expected answers and source citations, against which a configuration is scored.
 _Avoid_: Test set, benchmark, golden set

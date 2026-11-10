@@ -34,6 +34,9 @@ services:
       DATABASE_URL: postgresql://arkanine:arkanine@db:5432/arkanine
       INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-http://fake-inference:8080/v1}
       INFERENCE_MODEL: ${INFERENCE_MODEL:-fake-chat}
+      # Development default only; set your own before running anywhere real.
+      ARKANINE_ADMIN_USERNAME: ${ARKANINE_ADMIN_USERNAME:-admin}
+      ARKANINE_ADMIN_PASSWORD: ${ARKANINE_ADMIN_PASSWORD:-arkanine-dev-admin}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

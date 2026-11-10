@@ -147,6 +147,8 @@ Needs Python 3.9+ and Docker with Compose. `make bundle` and `make airgap-test` 
 
 A laptop or Mac with small quantised models is enough for demos. Pilots on real documents expect a single customer-supplied GPU server. See [GLOSSARY.md](GLOSSARY.md) for the shared vocabulary and [docs/adr/](docs/adr/) for architecture decisions.
 
+The API needs a signed-in user for everything except `/health`. On startup it creates the administrator named by `ARKANINE_ADMIN_USERNAME` and `ARKANINE_ADMIN_PASSWORD` if that account doesn't already exist. `make dev` uses `admin` / `arkanine-dev-admin` unless you set your own. Sign in with `POST /sessions` and send the returned token as `Authorization: Bearer <token>`. The administrator creates accounts with `POST /users` and grants a `reader` or `editor` Role per Collection with `PUT /collections/{id}/grants/{user_id}`. `DELETE` on the same path revokes it, effective from the user's next request.
+
 ## FAQ
 
 <details>

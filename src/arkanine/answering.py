@@ -12,6 +12,7 @@ from arkanine.passages import Passage
 
 NOT_FOUND = "NOT_FOUND"
 NOT_FOUND_ANSWER = "The documents in this Collection don't contain an answer to that question."
+NOT_FOUND_ANYWHERE_ANSWER = "The documents you can access don't contain an answer to that question."
 
 SYSTEM_PROMPT = (
     "You answer questions using only the passages between <passages> and </passages> in "
@@ -54,11 +55,13 @@ def build_messages(passages: list[Passage], question: str) -> list[dict[str, str
     ]
 
 
-def not_found() -> CitedAnswer:
-    return CitedAnswer(answer=NOT_FOUND_ANSWER, citations=[])
+def not_found(answer: str = NOT_FOUND_ANSWER) -> CitedAnswer:
+    return CitedAnswer(answer=answer, citations=[])
 
 
-def parse_reply(reply: str, passages: list[Passage]) -> CitedAnswer:
+def parse_reply(
+    reply: str, passages: list[Passage], not_found_answer: str = NOT_FOUND_ANSWER
+) -> CitedAnswer:
     """Keep only citations of passages that were actually sent, in order of first use.
 
     A reply that cites nothing it was given is treated as "not found", so the system
@@ -70,5 +73,5 @@ def parse_reply(reply: str, passages: list[Passage]) -> CitedAnswer:
         if 1 <= number <= len(passages) and passages[number - 1] not in cited:
             cited.append(passages[number - 1])
     if reply.strip() == NOT_FOUND or not cited:
-        return not_found()
+        return not_found(not_found_answer)
     return CitedAnswer(answer=reply.strip(), citations=cited)
