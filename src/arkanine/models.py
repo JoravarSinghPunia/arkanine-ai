@@ -19,3 +19,12 @@ class Document:
     collection_id: int
     title: str
     content: str
+
+
+@dataclass
+class User:
+    """A local account. Administrators can access every Collection."""
+
+    id: int
+    username: str
+    is_admin: bool

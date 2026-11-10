@@ -5,7 +5,14 @@ from typing import Any, Optional
 
 import psycopg
 
-from arkanine.models import Collection, Document
+from arkanine.accounts import (
+    UNKNOWN_USER_HASH,
+    hash_password,
+    hash_token,
+    new_token,
+    verify_password,
+)
+from arkanine.models import Collection, Document, User
 
 
 class DuplicateCollectionName(Exception):
@@ -56,6 +63,11 @@ class CollectionRepository:
             return None
         return Collection(id=row[0], name=row[1])
 
+    @staticmethod
+    def list_all() -> list[Collection]:
+        rows = _execute_query("SELECT id, name FROM collections ORDER BY id", ())
+        return [Collection(id=row[0], name=row[1]) for row in rows]
+
 
 class DocumentRepository:
     """Repository for Document operations."""
@@ -102,3 +114,141 @@ class DocumentRepository:
             (collection_id,),
         )
         return [_document(row) for row in rows]
+
+    @staticmethod
+    def get_by_collections(collection_ids: list[int]) -> list[Document]:
+        """Get all documents in any of the given collections."""
+        rows = _execute_query(
+            (
+                "SELECT id, collection_id, title, content FROM documents "
+                "WHERE collection_id = ANY(%s) ORDER BY id"
+            ),
+            (collection_ids,),
+        )
+        return [_document(row) for row in rows]
+
+
+class DuplicateUsername(Exception):
+    """A user with this username already exists."""
+
+
+def _user(row: tuple[Any, ...]) -> User:
+    return User(id=row[0], username=row[1], is_admin=row[2])
+
+
+class UserRepository:
+    """Repository for local accounts and their sessions."""
+
+    @staticmethod
+    def create(username: str, password: str, is_admin: bool = False) -> User:
+        try:
+            row = _execute_query(
+                (
+                    "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, %s) "
+                    "RETURNING id, username, is_admin"
+                ),
+                (username, hash_password(password), is_admin),
+                fetch_one=True,
+            )
+        except psycopg.errors.UniqueViolation as error:
+            raise DuplicateUsername(username) from error
+        return _user(row)
+
+    @staticmethod
+    def ensure_admin(username: str, password: str) -> None:
+        """Create the administrator if no account has this username yet."""
+        _execute_query(
+            (
+                "INSERT INTO users (username, password_hash, is_admin) VALUES (%s, %s, TRUE) "
+                "ON CONFLICT (username) DO NOTHING RETURNING id"
+            ),
+            (username, hash_password(password)),
+            fetch_one=True,
+        )
+
+    @staticmethod
+    def sign_in(username: str, password: str) -> Optional[str]:
+        """Return a new session token, or None if the credentials are wrong."""
+        row = _execute_query(
+            "SELECT id, password_hash FROM users WHERE username = %s", (username,), fetch_one=True
+        )
+        if not verify_password(password, row[1] if row else UNKNOWN_USER_HASH) or not row:
+            return None
+        token = new_token()
+        _execute_query(
+            "INSERT INTO sessions (token_hash, user_id) VALUES (%s, %s) RETURNING user_id",
+            (hash_token(token), row[0]),
+            fetch_one=True,
+        )
+        return token
+
+    @staticmethod
+    def get_by_id(user_id: int) -> Optional[User]:
+        row = _execute_query(
+            "SELECT id, username, is_admin FROM users WHERE id = %s", (user_id,), fetch_one=True
+        )
+        return _user(row) if row else None
+
+    @staticmethod
+    def by_token(token: str) -> Optional[User]:
+        row = _execute_query(
+            (
+                "SELECT u.id, u.username, u.is_admin FROM sessions s "
+                "JOIN users u ON u.id = s.user_id WHERE s.token_hash = %s"
+            ),
+            (hash_token(token),),
+            fetch_one=True,
+        )
+        return _user(row) if row else None
+
+
+class AccessRepository:
+    """Per-Collection roles. Administrators implicitly hold every role on every Collection."""
+
+    @staticmethod
+    def grant(user_id: int, collection_id: int, role: str) -> None:
+        _execute_query(
+            (
+                "INSERT INTO collection_grants (user_id, collection_id, role) VALUES (%s, %s, %s) "
+                "ON CONFLICT (user_id, collection_id) DO UPDATE SET role = EXCLUDED.role "
+                "RETURNING role"
+            ),
+            (user_id, collection_id, role),
+            fetch_one=True,
+        )
+
+    @staticmethod
+    def revoke(user_id: int, collection_id: int) -> None:
+        _execute_query(
+            (
+                "DELETE FROM collection_grants WHERE user_id = %s AND collection_id = %s "
+                "RETURNING role"
+            ),
+            (user_id, collection_id),
+        )
+
+    @staticmethod
+    def role(user: User, collection_id: int) -> Optional[str]:
+        """The user's role on an existing Collection, or None if they have no access."""
+        if user.is_admin:
+            return "editor" if CollectionRepository.get_by_id(collection_id) else None
+        row = _execute_query(
+            "SELECT role FROM collection_grants WHERE user_id = %s AND collection_id = %s",
+            (user.id, collection_id),
+            fetch_one=True,
+        )
+        return str(row[0]) if row else None
+
+    @staticmethod
+    def accessible_collections(user: User) -> list[Collection]:
+        if user.is_admin:
+            return CollectionRepository.list_all()
+        rows = _execute_query(
+            (
+                "SELECT c.id, c.name FROM collections c "
+                "JOIN collection_grants g ON g.collection_id = c.id "
+                "WHERE g.user_id = %s ORDER BY c.id"
+            ),
+            (user.id,),
+        )
+        return [Collection(id=row[0], name=row[1]) for row in rows]
