@@ -6,7 +6,8 @@ VENV := .venv
 PY := $(VENV)/bin/python
 
 # Test stack runs beside `make dev` on different ports and its own project.
-TEST_ENV := COMPOSE_PROJECT_NAME=arkanine-test API_PORT=18000 FAKE_INFERENCE_PORT=18080
+TEST_ENV := COMPOSE_PROJECT_NAME=arkanine-test API_PORT=18000 FAKE_INFERENCE_PORT=18080 \
+	INFERENCE_API_KEY=test-inference-key
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -16,8 +17,8 @@ setup: ## Install dependencies
 	$(PY) -m pip install --upgrade pip
 	$(PY) -m pip install -e ".[dev]"
 
-dev: ## Run the stack locally
-	docker compose up --build --wait
+dev: ## Run the stack locally; BACKEND=ollama|llamacpp|vllm uses a real model server
+	docker compose $(if $(BACKEND),--env-file backends/$(BACKEND).env) up --build --wait
 	@echo "API: http://localhost:8000/health"
 
 test: ## Run the test suite

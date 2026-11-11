@@ -10,11 +10,18 @@ FAKE_INFERENCE_URL = os.environ.get("ARKANINE_FAKE_INFERENCE_URL", "http://local
 # Must match the administrator the stack is started with (see compose.yaml).
 ADMIN_USERNAME = os.environ.get("ARKANINE_ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ARKANINE_ADMIN_PASSWORD", "arkanine-dev-admin")
+# Must match the INFERENCE_API_KEY the stack is started with (see Makefile).
+INFERENCE_API_KEY = os.environ.get("ARKANINE_INFERENCE_API_KEY", "test-inference-key")
 
 
 @pytest.fixture(scope="session")
 def admin_credentials() -> dict[str, str]:
     return {"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}
+
+
+@pytest.fixture(scope="session")
+def inference_api_key() -> str:
+    return INFERENCE_API_KEY
 
 
 @pytest.fixture(scope="session")

@@ -1,0 +1,61 @@
+{
+  "policy": "Only open-weight models from US and European labs are shipped (docs/adr/0002-model-provenance.md). Quantised files in the bundle are made from the original weights listed here with llama.cpp's own tools; third-party conversions are not shipped.",
+  "models": [
+    {
+      "name": "Llama 3.2 3B Instruct",
+      "role": "chat",
+      "tiers": ["laptop"],
+      "lab": "Meta",
+      "origin": "United States",
+      "licence": "Llama 3.2 Community License",
+      "source": "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct",
+      "served_as": {
+        "ollama": "llama3.2:3b",
+        "llamacpp": "llama-3.2-3b-instruct",
+        "vllm": "meta-llama/Llama-3.2-3B-Instruct"
+      }
+    },
+    {
+      "name": "Mistral Small 3.1 24B Instruct",
+      "role": "chat",
+      "tiers": ["gpu"],
+      "lab": "Mistral AI",
+      "origin": "France",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+      "served_as": {
+        "ollama": "mistral-small3.1:24b",
+        "llamacpp": "mistral-small-3.1-24b-instruct",
+        "vllm": "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+      }
+    },
+    {
+      "name": "gpt-oss-20b",
+      "role": "chat",
+      "tiers": ["gpu"],
+      "lab": "OpenAI",
+      "origin": "United States",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/openai/gpt-oss-20b",
+      "served_as": {
+        "ollama": "gpt-oss:20b",
+        "llamacpp": "gpt-oss-20b",
+        "vllm": "openai/gpt-oss-20b"
+      }
+    },
+    {
+      "name": "nomic-embed-text v1.5",
+      "role": "embedding",
+      "tiers": ["laptop", "gpu"],
+      "lab": "Nomic AI",
+      "origin": "United States",
+      "licence": "Apache-2.0",
+      "source": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5",
+      "served_as": {
+        "ollama": "nomic-embed-text",
+        "llamacpp": "nomic-embed-text-v1.5",
+        "vllm": "nomic-ai/nomic-embed-text-v1.5"
+      }
+    }
+  ]
+}

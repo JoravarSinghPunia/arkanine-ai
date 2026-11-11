@@ -1,4 +1,5 @@
-# Until real inference backends land, the stack points at the fake server.
+# By default the stack uses the fake inference server. `make dev BACKEND=<name>` points it
+# at a real model server instead; see docs/models.md.
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -34,11 +35,21 @@ services:
       DATABASE_URL: postgresql://arkanine:arkanine@db:5432/arkanine
       INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-http://fake-inference:8080/v1}
       INFERENCE_MODEL: ${INFERENCE_MODEL:-fake-chat}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
+      # Empty means the same server and key as chat.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-fake-embed}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_QUERY_PREFIX: ${EMBEDDING_QUERY_PREFIX:-}
+      EMBEDDING_DOCUMENT_PREFIX: ${EMBEDDING_DOCUMENT_PREFIX:-}
       # Development default only; set your own before running anywhere real.
       ARKANINE_ADMIN_USERNAME: ${ARKANINE_ADMIN_USERNAME:-admin}
       ARKANINE_ADMIN_PASSWORD: ${ARKANINE_ADMIN_PASSWORD:-arkanine-dev-admin}
     ports:
       - "${API_PORT:-8000}:8000"
+    # Model servers run on the host; Docker Desktop provides this name, Linux needs it mapped.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
