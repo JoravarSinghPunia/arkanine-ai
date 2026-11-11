@@ -1,0 +1,67 @@
+# Single GPU pilot tier: vLLM serves the chat model on one NVIDIA GPU, and llama.cpp serves
+# embeddings on the CPU, so no remote model code is needed. The model files are in
+# ARKANINE_HOME/models. See docs/models.md and docs/bundle.md.
+services:
+  chat:
+    image: vllm/vllm-openai:v0.33.0
+    pull_policy: never
+    restart: unless-stopped
+    command:
+      ["/models/Mistral-Small-3.1-24B-Instruct-2503",
+       "--served-model-name", "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+       "--tokenizer-mode", "mistral", "--config-format", "mistral", "--load-format", "mistral",
+       "--quantization", "fp8", "--max-model-len", "32768", "--gpu-memory-utilization", "0.9",
+       "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      # Never reach Hugging Face, and turn off vLLM's usage reporting (ADR 0003).
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - ./models:/models:ro
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 15m
+
+  embed:
+    image: ghcr.io/ggml-org/llama.cpp:server-b12282
+    pull_policy: never
+    restart: unless-stopped
+    command:
+      ["-m", "/models/nomic-embed-text-v1.5.f16.gguf", "--alias", "nomic-embed-text-v1.5",
+       "--embeddings", "--host", "0.0.0.0", "--port", "8080", "-c", "8192", "-b", "8192",
+       "-ub", "8192"]
+    volumes:
+      - ./models:/models:ro
+
+  api:
+    environment:
+      INFERENCE_BASE_URL: http://chat:8000/v1
+      INFERENCE_MODEL: mistralai/Mistral-Small-3.1-24B-Instruct-2503
+      EMBEDDING_BASE_URL: http://embed:8080/v1
+      EMBEDDING_MODEL: nomic-embed-text-v1.5
+      EMBEDDING_QUERY_PREFIX: "search_query: "
+      EMBEDDING_DOCUMENT_PREFIX: "search_document: "
+    depends_on:
+      chat:
+        condition: service_healthy
+      embed:
+        condition: service_healthy

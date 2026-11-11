@@ -31,7 +31,7 @@ Passages are embedded when a document is ingested and stored in Postgres with pg
 
 The [backends/](../backends/) folder holds one configuration per backend. `make dev BACKEND=<name>` starts the stack with it. Without `BACKEND`, the stack uses the fake inference server that the tests use. Models run on the host, not in Compose, so the API reaches them at `host.docker.internal`.
 
-During development, fetching models (`ollama pull`, downloading weights) needs the internet. In an installation, the weights come from the [Offline bundle](../GLOSSARY.md) and nothing is downloaded ([ADR 0003](adr/0003-zero-phone-home.md)).
+During development, fetching models (`ollama pull`, downloading weights) needs the internet. In an installation, the weights come from the [Offline bundle](bundle.md) and nothing is downloaded ([ADR 0003](adr/0003-zero-phone-home.md)).
 
 ### Ollama (laptop or Mac)
 
@@ -76,6 +76,8 @@ HF_HUB_OFFLINE=1 vllm serve /models/nomic-embed-text-v1.5 \
   --gpu-memory-utilization 0.05 --host 0.0.0.0 --port 8002 --api-key "$INFERENCE_API_KEY"
 make dev BACKEND=vllm
 ```
+
+The single GPU pilot [Offline bundle](bundle.md) serves embeddings with llama.cpp on the CPU instead, because vLLM loads nomic-embed-text's custom model code from Hugging Face, which an air-gapped server can't reach.
 
 To use gpt-oss-20b instead, serve it on port 8001 as `openai/gpt-oss-20b` and set `INFERENCE_MODEL=openai/gpt-oss-20b`. Firewall ports 8001 and 8002 so only the Arkanine host can reach them.
 
