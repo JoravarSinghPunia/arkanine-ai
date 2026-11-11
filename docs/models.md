@@ -77,6 +77,8 @@ HF_HUB_OFFLINE=1 vllm serve /models/nomic-embed-text-v1.5 \
 make dev BACKEND=vllm
 ```
 
+The single GPU pilot [Offline bundle](bundle.md) serves embeddings with llama.cpp on the CPU instead, because vLLM loads nomic-embed-text's custom model code from Hugging Face, which an air-gapped server can't reach.
+
 To use gpt-oss-20b instead, serve it on port 8001 as `openai/gpt-oss-20b` and set `INFERENCE_MODEL=openai/gpt-oss-20b`. Firewall ports 8001 and 8002 so only the Arkanine host can reach them.
 
 ## Hardware tiers

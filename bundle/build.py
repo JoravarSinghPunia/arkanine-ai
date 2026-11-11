@@ -173,7 +173,7 @@ def build(
     return archive_path
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tier", required=True, help="laptop, gpu or test; see bundle/tiers.json")
     parser.add_argument("--models-dir", type=Path, default=ROOT / "models" / "weights")
@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="the install machine's platform, e.g. linux/amd64; defaults to this Docker host's",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
     try:
         args.out.mkdir(parents=True, exist_ok=True)
         platform = (

@@ -14,7 +14,7 @@ import subprocess
 import tarfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 import pytest
@@ -28,7 +28,12 @@ def _run(*args: str | Path, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run([str(a) for a in args], capture_output=True, text=True, **kwargs)
 
 
-def _new_key(directory: Path) -> tuple[Path, Path]:
+class SigningKey(NamedTuple):
+    private: Path
+    signers: Path
+
+
+def _new_key(directory: Path) -> SigningKey:
     """A fresh Ed25519 key, and an allowed-signers file that trusts it for bundles."""
     directory.mkdir(parents=True)
     key = directory / "key"
@@ -36,24 +41,22 @@ def _new_key(directory: Path) -> tuple[Path, Path]:
     signers = directory / "allowed_signers"
     public = (directory / "key.pub").read_text().split()
     signers.write_text(f'{PRINCIPAL} namespaces="{NAMESPACE}" {public[0]} {public[1]}\n')
-    return key, signers
+    return SigningKey(key, signers)
 
 
 @pytest.fixture(scope="session")
-def release_key(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+def release_key(tmp_path_factory: pytest.TempPathFactory) -> SigningKey:
     return _new_key(tmp_path_factory.mktemp("keys") / "release")
 
 
 @pytest.fixture(scope="session")
-def other_key(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+def other_key(tmp_path_factory: pytest.TempPathFactory) -> SigningKey:
     return _new_key(tmp_path_factory.mktemp("keys") / "other")
 
 
 @pytest.fixture(scope="session")
-def bundle_archive(
-    tmp_path_factory: pytest.TempPathFactory, release_key: tuple[Path, Path]
-) -> Path:
-    key, signers = release_key
+def bundle_archive(tmp_path_factory: pytest.TempPathFactory, release_key: SigningKey) -> Path:
+    key, signers = release_key.private, release_key.signers
     out = tmp_path_factory.mktemp("dist")
     result = _run(
         "python3", ROOT / "bundle" / "build.py", "--tier", "test", "--version", "0.0.0-test",
@@ -91,9 +94,9 @@ def test_the_checksums_cover_every_file_in_the_bundle(bundle_dir: Path) -> None:
 
 
 def test_the_signature_verifies_with_standard_tools(
-    bundle_dir: Path, release_key: tuple[Path, Path]
+    bundle_dir: Path, release_key: SigningKey
 ) -> None:
-    _, signers = release_key
+    signers = release_key.signers
     result = _run(
         "ssh-keygen", "-Y", "verify", "-f", signers, "-I", PRINCIPAL, "-n", NAMESPACE,
         "-s", bundle_dir / "SHA256SUMS.sig", stdin=(bundle_dir / "SHA256SUMS").open(),
@@ -116,10 +119,8 @@ def _verify(bundle: Path, signers: Path) -> subprocess.CompletedProcess[str]:
     return _run("sh", bundle / "install.sh", "--verify-only", "--signers", signers, bundle)
 
 
-def test_an_untouched_bundle_passes_verification(
-    bundle_dir: Path, release_key: tuple[Path, Path]
-) -> None:
-    result = _verify(bundle_dir, release_key[1])
+def test_an_untouched_bundle_passes_verification(bundle_dir: Path, release_key: SigningKey) -> None:
+    result = _verify(bundle_dir, release_key.signers)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -141,6 +142,10 @@ def _remove_file(bundle: Path) -> None:
     next((bundle / "images").iterdir()).unlink()
 
 
+def _replace_installer(bundle: Path) -> None:
+    _replace(bundle / "install.sh", b'#!/bin/sh\necho "Verified"\n')
+
+
 def _rewrite_checksums(bundle: Path) -> None:
     """Edit a file and update SHA256SUMS to match, without being able to re-sign it."""
     _modify_compose(bundle)
@@ -154,11 +159,19 @@ def _rewrite_checksums(bundle: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "tamper", [_modify_compose, _modify_image, _add_file, _remove_file, _rewrite_checksums]
+    "tamper",
+    [
+        _modify_compose,
+        _modify_image,
+        _replace_installer,
+        _add_file,
+        _remove_file,
+        _rewrite_checksums,
+    ],
 )
 def test_a_tampered_bundle_fails_verification(
     bundle_dir: Path,
-    release_key: tuple[Path, Path],
+    release_key: SigningKey,
     tmp_path: Path,
     tamper: Callable[[Path], None],
 ) -> None:
@@ -167,20 +180,20 @@ def test_a_tampered_bundle_fails_verification(
     # Verify with the untouched installer, as an existing installation would.
     shutil.copy2(bundle_dir / "install.sh", tmp_path / "install.sh")
     result = _run(
-        "sh", tmp_path / "install.sh", "--verify-only", "--signers", release_key[1], bundle
+        "sh", tmp_path / "install.sh", "--verify-only", "--signers", release_key.signers, bundle
     )
     assert result.returncode != 0, result.stdout
     assert "Do not install this bundle" in result.stderr
 
 
 def test_a_bundle_signed_with_another_key_fails_verification(
-    bundle_dir: Path, release_key: tuple[Path, Path], other_key: tuple[Path, Path], tmp_path: Path
+    bundle_dir: Path, release_key: SigningKey, other_key: SigningKey, tmp_path: Path
 ) -> None:
     bundle = _copy(bundle_dir, tmp_path / "bundle")
     (bundle / "SHA256SUMS.sig").unlink()
-    _run("ssh-keygen", "-Y", "sign", "-q", "-f", other_key[0], "-n", NAMESPACE,
+    _run("ssh-keygen", "-Y", "sign", "-q", "-f", other_key.private, "-n", NAMESPACE,
          bundle / "SHA256SUMS", check=True)  # fmt: skip
-    result = _verify(bundle, release_key[1])
+    result = _verify(bundle, release_key.signers)
     assert result.returncode != 0, result.stdout
     assert "not signed by a trusted Arkanine key" in result.stderr
 
@@ -217,6 +230,12 @@ def installation(tmp_path: Path) -> Iterator[dict[str, str]]:
         _run("docker", "compose", "down", "--volumes", cwd=tmp_path / "arkanine", env=env)
 
 
+def _install(
+    bundle: Path, key: SigningKey, installation: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    return _run("sh", bundle / "install.sh", "--signers", key.signers, env=installation)
+
+
 def _remove_bundled_images(bundle: Path) -> None:
     """So the install can only work by loading the bundle's images, never by pulling."""
     for archive in (bundle / "images").iterdir():
@@ -228,11 +247,11 @@ def _remove_bundled_images(bundle: Path) -> None:
 
 
 def test_the_bundle_installs_and_answers_without_anything_downloaded(
-    bundle_dir: Path, release_key: tuple[Path, Path], installation: dict[str, str]
+    bundle_dir: Path, release_key: SigningKey, installation: dict[str, str]
 ) -> None:
     _remove_bundled_images(bundle_dir)
 
-    result = _run("sh", bundle_dir / "install.sh", "--signers", release_key[1], env=installation)
+    result = _install(bundle_dir, release_key, installation)
     assert result.returncode == 0, result.stdout + result.stderr
 
     home = Path(installation["ARKANINE_HOME"])
@@ -250,9 +269,9 @@ def test_the_bundle_installs_and_answers_without_anything_downloaded(
 
 
 def test_an_installation_verifies_later_bundles_with_its_own_key(
-    bundle_dir: Path, release_key: tuple[Path, Path], installation: dict[str, str]
+    bundle_dir: Path, release_key: SigningKey, installation: dict[str, str]
 ) -> None:
-    result = _run("sh", bundle_dir / "install.sh", "--signers", release_key[1], env=installation)
+    result = _install(bundle_dir, release_key, installation)
     assert result.returncode == 0, result.stdout + result.stderr
 
     installed = Path(installation["ARKANINE_HOME"]) / "bin" / "install.sh"

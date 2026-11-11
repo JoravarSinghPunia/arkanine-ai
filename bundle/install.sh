@@ -115,7 +115,7 @@ done
 mkdir -p "$ARKANINE_HOME/bin" "$ARKANINE_HOME/keys"
 rm -f "$ARKANINE_HOME"/compose.*.yaml
 cp "$bundle/compose.yaml" "$bundle/compose.$ARKANINE_TIER.yaml" "$ARKANINE_HOME/"
-# Kept so later bundles are verified by this installer and key, not by their own.
+# Kept so later bundles are verified by this script and key, not by their own.
 cp "$bundle/install.sh" "$ARKANINE_HOME/bin/install.sh"
 cp "$bundle/keys/allowed_signers" "$ARKANINE_HOME/keys/allowed_signers"
 rm -rf "$ARKANINE_HOME/models"
