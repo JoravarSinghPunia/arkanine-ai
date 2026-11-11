@@ -31,7 +31,7 @@ Passages are embedded when a document is ingested and stored in Postgres with pg
 
 The [backends/](../backends/) folder holds one configuration per backend. `make dev BACKEND=<name>` starts the stack with it. Without `BACKEND`, the stack uses the fake inference server that the tests use. Models run on the host, not in Compose, so the API reaches them at `host.docker.internal`.
 
-During development, fetching models (`ollama pull`, downloading weights) needs the internet. In an installation, the weights come from the [Offline bundle](../GLOSSARY.md) and nothing is downloaded ([ADR 0003](adr/0003-zero-phone-home.md)).
+During development, fetching models (`ollama pull`, downloading weights) needs the internet. In an installation, the weights come from the [Offline bundle](bundle.md) and nothing is downloaded ([ADR 0003](adr/0003-zero-phone-home.md)).
 
 ### Ollama (laptop or Mac)
 

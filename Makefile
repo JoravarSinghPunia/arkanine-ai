@@ -5,6 +5,12 @@
 VENV := .venv
 PY := $(VENV)/bin/python
 
+# `make bundle` settings; see docs/bundle.md.
+TIER ?= laptop
+MODELS_DIR ?= models/weights
+SIGNING_KEY ?= $(HOME)/.config/arkanine/release-signing-key
+PLATFORM ?=
+
 # Test stack runs beside `make dev` on different ports and its own project.
 TEST_ENV := COMPOSE_PROJECT_NAME=arkanine-test API_PORT=18000 FAKE_INFERENCE_PORT=18080 \
 	INFERENCE_API_KEY=test-inference-key
@@ -30,16 +36,17 @@ test: ## Run the test suite
 	exit $$code
 
 lint: ## Run linters and type checks
-	$(PY) -m ruff check src tests testing
-	$(PY) -m ruff format --check src tests testing
+	$(PY) -m ruff check src tests testing bundle
+	$(PY) -m ruff format --check src tests testing bundle
 	$(PY) -m mypy
 
 lint-fix: ## Automatically fix linting issues
-	$(PY) -m ruff check --fix src tests testing
-	$(PY) -m ruff format src tests testing
+	$(PY) -m ruff check --fix src tests testing bundle
+	$(PY) -m ruff format src tests testing bundle
 
-bundle: ## Build the signed offline bundle
-	@$(call todo,$@)
+bundle: ## Build the signed offline bundle in dist/; TIER=laptop|gpu|test
+	$(PY) bundle/build.py --tier $(TIER) --models-dir $(MODELS_DIR) \
+		--signing-key $(SIGNING_KEY) --out dist $(if $(PLATFORM),--platform $(PLATFORM))
 
 airgap-test: ## Verify the stack runs with networking disabled
 	@$(call todo,$@)
