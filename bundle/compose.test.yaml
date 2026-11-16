@@ -1,0 +1,30 @@
+# Test tier: the fake inference server instead of a model, for the API suite and airgap-test.
+services:
+  fake-inference:
+    image: arkanine/fake-inference:${ARKANINE_VERSION:?set by install.sh}
+    pull_policy: never
+    restart: unless-stopped
+    # Published on loopback only, so the API suite can inspect what the API sent.
+    ports:
+      - "127.0.0.1:${FAKE_INFERENCE_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://localhost:8080/v1/models')",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    environment:
+      INFERENCE_BASE_URL: http://fake-inference:8080/v1
+      INFERENCE_MODEL: fake-chat
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-test-inference-key}
+      EMBEDDING_MODEL: fake-embed
+    depends_on:
+      fake-inference:
+        condition: service_healthy

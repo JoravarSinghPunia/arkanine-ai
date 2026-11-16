@@ -1,0 +1,37 @@
+# Laptop or Mac demo tier: two llama.cpp servers, one per model, on the CPU.
+# The model files are in ARKANINE_HOME/models. See docs/models.md and docs/bundle.md.
+services:
+  chat:
+    image: ghcr.io/ggml-org/llama.cpp:server-b12282
+    pull_policy: never
+    restart: unless-stopped
+    command:
+      ["-m", "/models/Llama-3.2-3B-Instruct-Q4_K_M.gguf", "--alias", "llama-3.2-3b-instruct",
+       "--host", "0.0.0.0", "--port", "8080", "-c", "8192"]
+    volumes:
+      - ./models:/models:ro
+
+  embed:
+    image: ghcr.io/ggml-org/llama.cpp:server-b12282
+    pull_policy: never
+    restart: unless-stopped
+    command:
+      ["-m", "/models/nomic-embed-text-v1.5.f16.gguf", "--alias", "nomic-embed-text-v1.5",
+       "--embeddings", "--host", "0.0.0.0", "--port", "8080", "-c", "8192", "-b", "8192",
+       "-ub", "8192"]
+    volumes:
+      - ./models:/models:ro
+
+  api:
+    environment:
+      INFERENCE_BASE_URL: http://chat:8080/v1
+      INFERENCE_MODEL: llama-3.2-3b-instruct
+      EMBEDDING_BASE_URL: http://embed:8080/v1
+      EMBEDDING_MODEL: nomic-embed-text-v1.5
+      EMBEDDING_QUERY_PREFIX: "search_query: "
+      EMBEDDING_DOCUMENT_PREFIX: "search_document: "
+    depends_on:
+      chat:
+        condition: service_healthy
+      embed:
+        condition: service_healthy

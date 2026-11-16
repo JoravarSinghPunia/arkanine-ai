@@ -1,0 +1,48 @@
+# The installed stack. install.sh puts this file, the tier's compose.<tier>.yaml and a .env
+# in ARKANINE_HOME. Every image is loaded from the Offline bundle: nothing is built or pulled.
+name: arkanine
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.7-pg16
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: arkanine
+      POSTGRES_PASSWORD: ${ARKANINE_DB_PASSWORD:?set by install.sh}
+      POSTGRES_DB: arkanine
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arkanine"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    image: arkanine/api:${ARKANINE_VERSION:?set by install.sh}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://arkanine:${ARKANINE_DB_PASSWORD}@db:5432/arkanine
+      ARKANINE_ADMIN_USERNAME: ${ARKANINE_ADMIN_USERNAME:-admin}
+      ARKANINE_ADMIN_PASSWORD: ${ARKANINE_ADMIN_PASSWORD:?set by install.sh}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  db-data:
