@@ -120,7 +120,7 @@ def build(
         raise BundleError(f"unknown tier {tier!r}; choose one of {', '.join(sorted(tiers))}")
     # Check everything cheap before the slow image work.
     models = tiers[tier]["models"]
-    missing = [m["path"] for m in models if not (models_dir / m["path"]).exists()]
+    missing = [m["path"] for m in models if not _model_files(models_dir, m["path"])]
     if missing:
         raise BundleError(
             f"missing model files in {models_dir}: {', '.join(missing)}. Build them from the "
